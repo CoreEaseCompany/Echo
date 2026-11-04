@@ -538,6 +538,7 @@ body::before {
   box-sizing: border-box;
 }
 
+/* ホバー時の効果 */
 .post-card:hover {
   background: rgba(220, 230, 245, 0.42);
 }
@@ -570,6 +571,7 @@ body::before {
   overflow: hidden;
 }
 
+/* 投稿リンク */
 .post-card__post-link {
   width: 100%;
   height: 100%;
@@ -581,6 +583,7 @@ body::before {
   text-decoration: none;
 }
 
+/* 投稿本文 */
 .post-card__text {
   margin: 0;
   width: 100%;
@@ -600,12 +603,13 @@ body::before {
   overflow: hidden;
 }
 
+/* ユーザー名 */
 .post-card__username {
   position: absolute;
   top: 0;
   left: 50%;
   width: 90%;
-  height: 10%;
+  height: 25%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -619,6 +623,7 @@ body::before {
   text-overflow: ellipsis;
 }
 
+/* タグ */
 .post-card__tags {
   display: flex;
   justify-content: center;
@@ -626,15 +631,17 @@ body::before {
   gap: 8px;
 }
 
+/* タグ */
 .post-card__tag {
   color: #e2e8f0;
   font-size: 12px;
 }
 
+/* アクションボタン */
 .post-card__actions {
   position: absolute;
   left: 50%;
-  top: 90%;
+  top: 80%;
   bottom: 0;
   width: auto;
   transform: translateX(-50%);
@@ -646,6 +653,7 @@ body::before {
   box-sizing: border-box;
 }
 
+/* アクションボタン */
 .post-card__actions button {
   min-width: 54px;
   padding: 4px 14px;
@@ -657,10 +665,12 @@ body::before {
   cursor: pointer;
 }
 
+/* アクションボタン */
 .post-card__actions button:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* 編集フォーム */
 .post-card__edit {
   position: absolute;
   top: 10%;
