@@ -1,9 +1,15 @@
+
 "use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+
+type Tag = {
+  id: number;
+  name: string;
+};
 
 type Post = {
   id: number;
@@ -23,17 +29,21 @@ type Comment = {
   created_at: string;
 };
 
-// 投稿詳細ページ
+type Profile = {
+  user_id: string;
+  username: string | null;
+};
+
 export default function PostDetail() {
   const params = useParams();
   const id = params.id as string;
 
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [commentContent, setCommentContent] = useState("");
   const [loading, setLoading] = useState(true);
-
-  // ログイン中のユーザーID
   const [userId, setUserId] = useState("");
 
   useEffect(() => {
@@ -68,6 +78,26 @@ export default function PostDetail() {
 
       setPost(postData);
 
+      // 投稿に紐づくタグを取得
+      const { data: tagData, error: tagError } = await supabase
+        .from("post_tags")
+        .select("tags(id, name)")
+        .eq("post_id", Number(id));
+
+      if (tagError) {
+        console.error(tagError);
+      } else {
+        const fetchedTags = (
+          (tagData ?? []) as unknown as {
+            tags: Tag | Tag[] | null;
+          }[]
+        ).flatMap((item) =>
+          Array.isArray(item.tags) ? item.tags : item.tags ? [item.tags] : []
+        );
+
+        setTags(fetchedTags);
+      }
+
       // コメントを取得
       const { data: commentData, error: commentError } =
         await supabase
@@ -79,7 +109,28 @@ export default function PostDetail() {
       if (commentError) {
         console.error(commentError);
       } else {
-        setComments(commentData);
+        setComments(commentData ?? []);
+      }
+
+      // 投稿者とコメント投稿者のIDをまとめる
+      const userIds = [
+        ...new Set([
+          postData.user_id,
+          ...(commentData ?? []).map((comment) => comment.user_id),
+        ]),
+      ];
+
+      // プロフィールを取得
+      const { data: profileData, error: profileError } =
+        await supabase
+          .from("profiles")
+          .select("user_id, username")
+          .in("user_id", userIds);
+
+      if (profileError) {
+        console.error(profileError);
+      } else {
+        setProfiles(profileData ?? []);
       }
 
       setLoading(false);
@@ -101,9 +152,7 @@ export default function PostDetail() {
       return;
     }
 
-    if (!post) {
-      return;
-    }
+    if (!post) return;
 
     if (hasEmpathy) {
       const { error } = await supabase
@@ -152,7 +201,7 @@ export default function PostDetail() {
       return;
     }
 
-    if (!commentContent.trim()) {
+    if (!commentContent.trim() || !post) {
       alert("コメントを入力してください");
       return;
     }
@@ -161,7 +210,7 @@ export default function PostDetail() {
       .from("comments")
       .insert({
         user_id: userId,
-        post_id: post?.id,
+        post_id: post.id,
         content: commentContent.trim(),
       })
       .select()
@@ -172,7 +221,21 @@ export default function PostDetail() {
       return;
     }
 
-    setComments([...comments, data]);
+    setComments((current) => [...current, data]);
+
+    // 自分のプロフィールが未取得なら取得
+    if (!profiles.some((profile) => profile.user_id === userId)) {
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("user_id, username")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (profileData) {
+        setProfiles((current) => [...current, profileData]);
+      }
+    }
+
     setCommentContent("");
   };
 
@@ -188,8 +251,8 @@ export default function PostDetail() {
       return;
     }
 
-    setComments(
-      comments.filter((comment) => comment.id !== commentId)
+    setComments((current) =>
+      current.filter((comment) => comment.id !== commentId)
     );
   };
 
@@ -201,15 +264,52 @@ export default function PostDetail() {
     return <p>投稿が見つかりません。</p>;
   }
 
+  // ユーザーIDからユーザー名を取得する関数
+  const getUsername = (targetUserId: string) => {
+    return (
+      profiles.find(
+        (profile) => profile.user_id === targetUserId
+      )?.username || "名前未設定"
+    );
+  };
+
   return (
     <main>
       <h1>投稿詳細</h1>
 
+      {/* 投稿者情報 */}
+      <p>
+        投稿者：
+        <Link href={`/profile/${post.user_id}`}>
+          {getUsername(post.user_id)}
+        </Link>
+      </p>
+
       {/* 投稿内容 */}
       <p>{post.content}</p>
 
+      {/* タグ表示 */}
+      {tags.length > 0 && (
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          {tags.map((tag) => (
+            <span
+              key={tag.id}
+              style={{
+                backgroundColor: "#e5e7eb",
+                color: "#374151",
+                padding: "4px 10px",
+                borderRadius: "16px",
+                fontSize: "12px",
+              }}
+            >
+              #{tag.name}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* 投稿日時 */}
-      <p>{post.created_at}</p>
+      <p>{new Date(post.created_at).toLocaleString("ja-JP")}</p>
 
       {/* 共感数 */}
       <p>共感数：{post.empathies.length}</p>
@@ -221,20 +321,31 @@ export default function PostDetail() {
 
       {/* コメント */}
       <h2>コメント</h2>
-      
+
       {comments.length === 0 ? (
         <p>まだコメントはありません。</p>
       ) : (
         comments.map((comment) => (
           <div key={comment.id}>
+            <p>
+              <Link href={`/profile/${comment.user_id}`}>
+                {getUsername(comment.user_id)}
+              </Link>
+            </p>
+
             <p>{comment.content}</p>
-            <small>{comment.created_at}</small>
+
+            <small>
+              {new Date(comment.created_at).toLocaleString("ja-JP")}
+            </small>
 
             {comment.user_id === userId && (
               <button onClick={() => handleDeleteComment(comment.id)}>
                 削除
               </button>
             )}
+
+            <hr />
           </div>
         ))
       )}
@@ -252,11 +363,9 @@ export default function PostDetail() {
         </button>
       </div>
 
-      {/*投稿一覧へ戻るリンク */}
       <Link href="/">
         ← 投稿一覧へ戻る
       </Link>
-
     </main>
   );
 }
