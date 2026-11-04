@@ -20,7 +20,13 @@ body {
   bottom: 0;
   left: 0;
   z-index: 50;
-  background: rgba(17, 24, 39, 0.96);
+  background: transparent;
+}
+
+.site-footer-label,
+.home-tag-area h2 {
+  color: white;
+  opacity: 1;
 }
 
 .app-main {
