@@ -71,7 +71,7 @@ export default function RootLayout({
           {children}
         </main>
 
-        <footer className="site-footer border-t border-gray-200 py-4 text-center text-xs">
+        <footer className="site-footer border-t border-gray-200 py-2 text-center text-xs">
           <span className="site-footer-label">© 2026 Echo</span>
         </footer>
       </body>

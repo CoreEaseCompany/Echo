@@ -524,6 +524,7 @@ body::before {
   width: 100%;
   height: 220px;
   padding: 24px;
+  position: relative;
 
   display: flex;
   justify-content: center;
@@ -557,18 +558,40 @@ body::before {
 }
 
 /* 投稿本文 */
+.post-card__post-body {
+  position: absolute;
+  top: 10%;
+  right: 5%;
+  bottom: 10%;
+  left: 5%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
 .post-card__post-link {
   width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   color: white;
   text-decoration: none;
 }
 
 .post-card__text {
   margin: 0;
+  width: 100%;
+  max-height: 100%;
+  text-align: center;
   font-size: 22px;
   font-weight: 500;
   line-height: 1.6;
   overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align-last: center;
 
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -578,9 +601,22 @@ body::before {
 }
 
 .post-card__username {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 90%;
+  height: 10%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: #dbeafe;
   font-size: 13px;
   text-decoration: none;
+  text-align: center;
+  transform: translateX(-50%);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .post-card__tags {
@@ -596,14 +632,23 @@ body::before {
 }
 
 .post-card__actions {
+  position: absolute;
+  left: 50%;
+  top: 90%;
+  bottom: 0;
+  width: auto;
+  transform: translateX(-50%);
   display: flex;
+  align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px;
+  box-sizing: border-box;
 }
 
 .post-card__actions button {
-  padding: 5px 14px;
+  min-width: 54px;
+  padding: 4px 14px;
   border: 1px solid rgba(255, 255, 255, 0.4);
   border-radius: 4px;
   background: rgba(15, 23, 42, 0.55);
@@ -617,9 +662,14 @@ body::before {
 }
 
 .post-card__edit {
-  width: 100%;
-  max-width: 400px;
+  position: absolute;
+  top: 10%;
+  left: 50%;
+  width: 90%;
+  height: 80%;
+  transform: translateX(-50%);
   padding: 10px;
+  text-align: center;
   color: #1e293b;
   background: white;
   border-radius: 4px;
@@ -641,14 +691,22 @@ body::before {
   flex: 0 0 auto;
 }
 
-.post-grid {
+.post-grid-scroll {
   width: min(100% - 40px, 1200px);
   margin: 0 auto;
-  padding: 10px 0 40px;
   flex: 1;
   min-height: 0;
+  position: relative;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.post-grid {
+  width: 100%;
+  margin: 0;
+  padding: 10px 0 40px;
+  position: relative;
+  box-sizing: border-box;
 
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

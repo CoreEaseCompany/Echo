@@ -94,14 +94,16 @@ export default function PostCard({
             </div>
           </>
         ) : (
-          <Link
-            href={`/post/${post.id}`}
-            className="post-card__post-link"
-          >
-            <p className="post-card__text">
-              {post.content}
-            </p>
-          </Link>
+          <div className="post-card__post-body">
+            <Link
+              href={`/post/${post.id}`}
+              className="post-card__post-link"
+            >
+              <p className="post-card__text">
+                {post.content}
+              </p>
+            </Link>
+          </div>
         )}
 
         {/* タグ */}

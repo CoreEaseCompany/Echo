@@ -234,32 +234,34 @@ export default function Home() {
       </section>
 
       {/* 投稿一覧 */}
-      <section className="post-grid">
-        {loading ? (
-          <p className="text-center">読み込み中...</p>
-        ) : posts.length === 0 ? (
-          <p className="text-center">
-            該当する投稿はありません。
-          </p>
-        ) : (
-          posts.map((post) => {
-            const profile = profiles.find(
-              (item) => item.user_id === post.user_id
-            );
+      <div className="post-grid-scroll">
+        <section className="post-grid">
+          {loading ? (
+            <p className="text-center">読み込み中...</p>
+          ) : posts.length === 0 ? (
+            <p className="text-center">
+              該当する投稿はありません。
+            </p>
+          ) : (
+            posts.map((post) => {
+              const profile = profiles.find(
+                (item) => item.user_id === post.user_id
+              );
 
-            return (
-              <PostCard
-                key={post.id}
-                post={post}
-                userId={userId}
-                username={profile?.username ?? "名前未設定"}
-                tags={postTags[post.id] ?? []}
-                onDelete={handleDelete}
-              />
-            );
-          })
-        )}
-      </section>
+              return (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  userId={userId}
+                  username={profile?.username ?? "名前未設定"}
+                  tags={postTags[post.id] ?? []}
+                  onDelete={handleDelete}
+                />
+              );
+            })
+          )}
+        </section>
+      </div>
     </main>
   );
 }
