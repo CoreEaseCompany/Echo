@@ -707,6 +707,7 @@ body::before {
   flex: 1;
   min-height: 0;
   position: relative;
+  left: 20px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -716,6 +717,7 @@ body::before {
   margin: 0;
   padding: 10px 0 40px;
   position: relative;
+  left: -20px;
   box-sizing: border-box;
 
   display: grid;
