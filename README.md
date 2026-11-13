@@ -1,36 +1,306 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Echo
 
-## Getting Started
+匿名で悩みや感情を共有できるWebアプリケーション「Echo」の開発プロジェクトです。
 
-First, run the development server:
+## 1. プロジェクト概要
+
+### コンセプト
+
+Echoは、日常生活で抱える悩みや感情を匿名で投稿し、他のユーザーと共有できるSNSです。
+
+誰にも言えない気持ちを気軽に吐き出せる場所を目指しています。
+
+### サービスの方向性
+
+- 匿名性を重視した投稿サービス
+- 悩みや感情を共有できるコミュニティ
+- 投稿への共感やコメントによる交流
+- 落ち着いた夜・雨をイメージしたデザイン
+- 10代〜30代を主なターゲットとする
+
+### 開発目的
+
+1. Webアプリケーションの企画から公開までを一通り経験する
+2. 実用的なWebサービスを個人開発する
+3. 将来的に広告などによる収益化を目指す
+
+最初の収益目標は、金額の大小にかかわらず、自分の開発したサービスで1円以上を稼ぐこと。
+
+## 2. 技術構成
+
+| 分類 | 技術 |
+|---|---|
+| フロントエンド | Next.js |
+| UIライブラリ | React |
+| 言語 | TypeScript |
+| スタイリング | CSS / Tailwind CSS |
+| バックエンド | Supabase |
+| データベース | PostgreSQL（Supabase） |
+| 認証 | Supabase Auth |
+| バージョン管理 | Git / GitHub |
+| 開発環境 | Visual Studio Code |
+| AI開発支援 | Claude Code |
+| デプロイ候補 | Vercel |
+
+### アーキテクチャ
+
+Next.jsをフロントエンドとして使用し、Supabaseをバックエンドサービスとして利用する。
+
+データベースへのアクセス、ユーザー認証などはSupabaseを通じて行う。
+
+現時点では独自のバックエンドサーバーは実装していない。
+
+## 3. 実装済み機能
+
+### 認証機能
+- ユーザー新規登録
+- ログイン
+- ログアウト
+- Supabase Authによるユーザー管理
+
+### 投稿機能
+- 投稿作成
+- 投稿一覧表示
+- 新しい投稿順での表示
+- 投稿詳細画面
+- 自分の投稿の編集
+- 自分の投稿の削除
+
+### 共感機能
+- 投稿への共感
+- 共感の解除
+- 共感数の表示
+- 同じユーザーによる重複共感の防止
+
+### コメント機能
+- コメント投稿
+- コメント一覧表示
+- 自分のコメントの削除
+
+### プロフィール機能
+- ユーザー名の設定・変更
+- 自己紹介の設定・変更
+- 他ユーザーのプロフィール閲覧
+- プロフィール画面からの投稿一覧表示
+- 投稿者名からプロフィールへの遷移
+
+### タグ機能
+- 投稿時のタグ選択
+- 複数タグの設定
+- 投稿へのタグ表示
+- タグによる投稿検索
+
+### UI / UX
+- 背景画像を使用したデザイン
+- 半透明の投稿カード
+- 投稿一覧のグリッド表示
+- タグ検索エリア
+- 投稿一覧領域のみのスクロール
+- レスポンシブ対応
+
+※機能の詳細な仕様やデータベース構造は、今後作成するREQUIREMENTS.md、DESIGN.md、DATABASE.mdを参照する。
+
+## 4. プロジェクト構成
+
+現在の主なディレクトリ構成。
+
+```text
+Echo/
+├── app/
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── globals.css
+│   ├── login/
+│   ├── signup/
+│   ├── post/
+│   │   ├── page.tsx
+│   │   └── [id]/
+│   │       └── page.tsx
+│   └── profile/
+│       ├── page.tsx
+│       └── [userId]/
+│           └── page.tsx
+│
+├── components/
+│   ├── Header.tsx
+│   └── PostCard.tsx
+│
+├── lib/
+│   └── supabase.ts
+│
+├── public/
+│   └── images/
+│
+├── package.json
+├── package-lock.json
+└── README.md
+```
+
+※実際のディレクトリ構成は変更される可能性がある。実装前に必ずプロジェクト内のファイルを確認すること。
+
+## 5. 開発環境の構築
+
+### 必要な環境
+
+- Node.js
+- npm
+- Git
+- GitHubアカウント
+- Supabaseプロジェクト
+
+### リポジトリの取得
+
+```bash
+git clone <リポジトリURL>
+cd Echo
+```
+
+### パッケージのインストール
+
+```bash
+npm install
+```
+
+### 環境変数の設定
+
+プロジェクトルートに `.env.local` を作成する。
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=SupabaseのProjectURL
+NEXT_PUBLIC_SUPABASE_ANON_KEY=SupabaseのPublishableKeyまたはAnonKey
+```
+
+実際に使用している環境変数名は `lib/supabase.ts` を確認すること。
+
+SupabaseのURLと公開用キーはSupabaseのプロジェクト設定から取得する。
+
+注意事項：
+
+- `.env.local` はGitHubに公開しない。
+- APIキーや秘密情報をソースコードに直接記述しない。
+- SupabaseのSecret KeyやService Role Keyをクライアント側に公開しない。
+
+### 開発サーバーの起動
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ブラウザで以下にアクセスする。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### ビルド確認
 
-## Learn More
+```bash
+npm run build
+```
 
-To learn more about Next.js, take a look at the following resources:
+## 6. データベース
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+SupabaseのPostgreSQLを使用する。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+現在の主なテーブルは以下のとおり。
 
-## Deploy on Vercel
+| テーブル | 役割 |
+|---|---|
+| posts | 投稿情報 |
+| profiles | ユーザープロフィール |
+| empathies | 投稿への共感 |
+| comments | コメント |
+| tags | タグ情報 |
+| post_tags | 投稿とタグの中間テーブル |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+各テーブルのカラム、リレーション、制約、RLSポリシーについてはDATABASE.mdを参照する。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### セキュリティ
+
+SupabaseのRow Level Security（RLS）を使用し、ユーザーごとのデータ操作を制御する。
+
+特に以下を重視する。
+
+- 投稿の編集・削除は投稿者本人のみ可能
+- コメントの削除は投稿者本人のみ可能
+- 共感の追加・解除は操作した本人のみ可能
+- プロフィールの更新は本人のみ可能
+- 認証が必要なデータへの未認証アクセスを制限する
+
+RLSはクライアント側の表示制御とは別に、データベース側で必ず検証する。
+
+## 7. 開発方針
+
+### 基本方針
+
+- 既存機能を壊さないことを最優先とする。
+- 実装前に関連ファイルと既存コードを確認する。
+- 既存の設計や命名規則に合わせる。
+- 必要以上に複雑な実装を避ける。
+- 保守性と可読性を重視する。
+- 変更範囲を必要最小限にする。
+- 実装後は動作確認とビルド確認を行う。
+- 不明な仕様を推測で決めず、必要に応じて確認する。
+
+### コスト方針
+
+個人開発であるため、ランニングコストを可能な限り抑える。
+
+- 無料プランや低コストのサービスを優先する。
+- 不要な外部APIの利用を避ける。
+- AI APIなど従量課金サービスは、費用対効果を確認してから導入する。
+- データベースやストレージの利用量にも注意する。
+
+### AI開発支援
+
+Claude Codeを主なコーディング支援ツールとして使用する。
+
+ChatGPTは主に以下の用途で利用する。
+
+- 企画・アイデアの検討
+- 仕様の整理
+- 技術選定
+- システム設計の相談
+- 実装方針の検討
+
+Claude Codeは実際のコード調査・実装・修正・テストに使用する。
+
+## 8. 今後の開発予定
+
+現時点での主な課題・予定。
+
+- パスワードリセット機能の整備
+- UI / UXの改善
+- 投稿カードのレイアウト整理
+- CSSの重複・不要コードの整理
+- Reactの状態管理の改善
+- SupabaseのRLS・セキュリティの再確認
+- エラー処理・ローディング表示の改善
+- レスポンシブ表示の確認
+- Vercelへのデプロイ
+- README以外の設計ドキュメント整備
+- 公開前の動作テスト
+- SEO・広告導入の検討
+
+## 9. 重要事項
+
+このREADMEはプロジェクト全体の概要と環境構築方法を説明するためのドキュメント。
+
+詳細な仕様・設計・実装状況については、以下のドキュメントを参照する。
+
+| ファイル | 内容 |
+|---|---|
+| README.md | プロジェクト概要・環境構築 |
+| REQUIREMENTS.md | 機能要件 |
+| DESIGN.md | 画面・システム設計 |
+| ARCHITECTURE.md | 技術構成・実装方針 |
+| DATABASE.md | DB構造・リレーション |
+| TASKS.md | 実装状況・残タスク |
+
+これらのドキュメント間で情報に矛盾がある場合は、実際のソースコードとSupabaseの現在の設定を確認し、現状を優先して判断する。
+
+---
+
+**Project: Echo**
+
+匿名で気持ちを共有できる場所を作る。

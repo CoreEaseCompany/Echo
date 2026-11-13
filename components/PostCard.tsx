@@ -33,26 +33,49 @@ export default function PostCard({
 }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
+  const [displayContent, setDisplayContent] = useState(post.content);
+  const [isSaving, setIsSaving] = useState(false);
 
+  // 編集開始
+  const handleEdit = () => {
+    setEditContent(displayContent);
+    setIsEditing(true);
+  };
+
+  // 編集キャンセル
+  const handleCancel = () => {
+    setEditContent(displayContent);
+    setIsEditing(false);
+  };
+
+  // 投稿更新
   const handleUpdate = async () => {
-    if (!editContent.trim()) {
+    const trimmedContent = editContent.trim();
+
+    if (!trimmedContent) {
       alert("投稿内容を入力してください");
       return;
     }
 
+    if (isSaving) return;
+
+    setIsSaving(true);
+
     const { error } = await supabase
       .from("posts")
       .update({
-        content: editContent.trim(),
+        content: trimmedContent,
       })
       .eq("id", post.id);
+
+    setIsSaving(false);
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    post.content = editContent.trim();
+    setDisplayContent(trimmedContent);
     setIsEditing(false);
   };
 
@@ -60,75 +83,83 @@ export default function PostCard({
     <article className="post-card">
       <div className="post-card__content">
 
-        {/* 投稿者 */}
-        <Link
-          href={`/profile/${post.user_id}`}
-          className="post-card__username"
-        >
-          {username}
-        </Link>
+        {/* ヘッダー：投稿者 */}
+        <div className="post-card__header">
+          <Link
+            href={`/profile/${post.user_id}`}
+            className="post-card__username"
+          >
+            {username}
+          </Link>
+        </div>
 
-        {/* 投稿内容 */}
-        {isEditing ? (
-          <>
+        {/* ボディ：投稿内容・タグ */}
+        <div className="post-card__body">
+
+          {isEditing ? (
             <textarea
               className="post-card__edit"
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               rows={4}
+              disabled={isSaving}
             />
-
-            <div className="post-card__actions">
-              <button onClick={handleUpdate}>
-                保存
-              </button>
-
-              <button
-                onClick={() => {
-                  setEditContent(post.content);
-                  setIsEditing(false);
-                }}
+          ) : (
+            <div className="post-card__post-body">
+              <Link
+                href={`/post/${post.id}`}
+                className="post-card__post-link"
               >
-                キャンセル
-              </button>
+                <p className="post-card__text">
+                  {displayContent}
+                </p>
+              </Link>
             </div>
-          </>
-        ) : (
-          <div className="post-card__post-body">
-            <Link
-              href={`/post/${post.id}`}
-              className="post-card__post-link"
-            >
-              <p className="post-card__text">
-                {post.content}
-              </p>
-            </Link>
-          </div>
-        )}
+          )}
 
-        {/* タグ */}
-        {tags.length > 0 && (
-          <div className="post-card__tags">
-            {tags.map((tag) => (
-              <span key={tag.id} className="post-card__tag">
-                #{tag.name}
-              </span>
-            ))}
-          </div>
-        )}
+          {/* タグ */}
+          {tags.length > 0 && (
+            <div className="post-card__tags">
+              {tags.map((tag) => (
+                <span key={tag.id} className="post-card__tag">
+                  #{tag.name}
+                </span>
+              ))}
+            </div>
+          )}
 
-        {/* 投稿者本人のみ編集・削除可能 */}
+        </div>
+
+        {/* フッター：操作ボタン */}
         {post.user_id === userId && (
           <div className="post-card__actions">
-            {!isEditing && (
-              <button onClick={() => setIsEditing(true)}>
-                編集
-              </button>
-            )}
+            {isEditing ? (
+              <>
+                <button
+                  onClick={handleUpdate}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "保存中..." : "保存"}
+                </button>
 
-            <button onClick={() => onDelete(post.id)}>
-              削除
-            </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={isSaving}
+                >
+                  キャンセル
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={handleEdit}>
+                  編集
+                </button>
+
+                <button onClick={() => onDelete(post.id)}>
+                  削除
+                </button>
+              </>
+            )}
           </div>
         )}
 
