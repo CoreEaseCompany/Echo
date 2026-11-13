@@ -228,12 +228,11 @@ body::before {
 ========================= */
 
 .post-grid-scroll {
-  width: min(100% - 40px, 1200px);
-  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  padding-inline: max(20px, calc((100% - 1200px) / 2));
   flex: 1;
   min-height: 0;
-  position: relative;
-  left: 20px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -242,8 +241,6 @@ body::before {
   width: 100%;
   margin: 0;
   padding: 10px 0 40px;
-  position: relative;
-  left: -20px;
   box-sizing: border-box;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
