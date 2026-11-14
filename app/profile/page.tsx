@@ -1,18 +1,13 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-
-type Profile = {
-  user_id: string;
-  username: string | null;
-  bio: string | null;
-};
+import { getUserColor } from "@/lib/userColor";
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
   const [loading, setLoading] = useState(true);
@@ -24,10 +19,12 @@ export default function ProfilePage() {
       const { data: authData } = await supabase.auth.getUser();
 
       if (!authData.user) {
-        setMessage("ログインしてください");
         setLoading(false);
         return;
       }
+
+      setUserId(authData.user.id);
+      setEmail(authData.user.email ?? "");
 
       const { data, error } = await supabase
         .from("profiles")
@@ -39,7 +36,6 @@ export default function ProfilePage() {
         setMessage("プロフィールの取得に失敗しました");
         console.error(error);
       } else if (data) {
-        setProfile(data);
         setUsername(data.username ?? "");
         setBio(data.bio ?? "");
       }
@@ -73,11 +69,9 @@ export default function ProfilePage() {
       updated_at: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("profiles")
-      .upsert(profileData, { onConflict: "user_id" })
-      .select()
-      .single();
+      .upsert(profileData, { onConflict: "user_id" });
 
     setSaving(false);
 
@@ -92,43 +86,62 @@ export default function ProfilePage() {
       return;
     }
 
-    setProfile(data);
     setMessage("プロフィールを保存しました");
   };
 
   if (loading) {
-    return <main>読み込み中...</main>;
+    return (
+      <section className="profile-card profile-card--state">
+        <p>読み込み中...</p>
+      </section>
+    );
+  }
+
+  if (!userId) {
+    return (
+      <section className="profile-card profile-card--state">
+        <p>ログインしてください</p>
+        <Link href="/login" className="profile-card__link">
+          ログインページへ
+        </Link>
+      </section>
+    );
   }
 
   return (
-    <main>
-      <h1>プロフィール</h1>
+    <section className="profile-card">
+      <h1 className="profile-card__title">プロフィール</h1>
 
-      {profile && (
-        <div>
-          <h2>現在のプロフィール</h2>
-          <p>{profile.username}</p>
-          <p>{profile.bio || "自己紹介はありません"}</p>
-        </div>
-      )}
+      <div
+        className="profile-card__icon"
+        style={{ backgroundColor: getUserColor(userId) }}
+        aria-hidden="true"
+      />
 
-      <hr />
-
-      <h2>プロフィール編集</h2>
-
-      <div>
-        <label htmlFor="username">ユーザー名</label>
+      <div className="profile-card__field">
+        <label htmlFor="username">ユーザーネーム</label>
         <input
           id="username"
           type="text"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           maxLength={30}
-          placeholder="ユーザー名"
+          placeholder="ユーザーネーム"
         />
       </div>
 
-      <div>
+      <div className="profile-card__field">
+        <label htmlFor="email">メールアドレス</label>
+        <input
+          id="email"
+          type="email"
+          value={email}
+          readOnly
+          className="profile-card__input--readonly"
+        />
+      </div>
+
+      <div className="profile-card__field">
         <label htmlFor="bio">自己紹介</label>
         <textarea
           id="bio"
@@ -140,15 +153,18 @@ export default function ProfilePage() {
         />
       </div>
 
-      <button onClick={handleSave} disabled={saving}>
-        {saving ? "保存中..." : "保存する"}
-      </button>
+      <div className="profile-card__footer">
+        <button
+          type="button"
+          className="profile-card__save"
+          onClick={handleSave}
+          disabled={saving}
+        >
+          {saving ? "保存中..." : "保存する"}
+        </button>
+      </div>
 
-      {message && <p>{message}</p>}
-
-      <p>
-        <Link href="/">投稿一覧へ戻る</Link>
-      </p>
-    </main>
+      {message && <p className="profile-card__message">{message}</p>}
+    </section>
   );
 }

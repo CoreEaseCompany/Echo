@@ -49,7 +49,7 @@ export default function UpdatePasswordPage() {
   };
 
   return (
-    <main>
+    <div>
       <h1>新しいパスワードの設定</h1>
 
       <p>新しいパスワードを入力してください。</p>
@@ -90,6 +90,6 @@ export default function UpdatePasswordPage() {
       <p>
         <Link href="/login">ログイン画面へ戻る</Link>
       </p>
-    </main>
+    </div>
   );
 }

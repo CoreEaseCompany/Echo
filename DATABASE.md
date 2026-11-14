@@ -95,8 +95,19 @@ create table posts (
 |---|---|---|---|
 | id | bigint | PK | 投稿ID |
 | user_id | uuid | FK / NOT NULL | 投稿者のユーザーID |
-| content | text | NOT NULL | 投稿本文 |
+| content | text | NOT NULL / CHECK | 投稿本文（500文字以下・空白のみ不可 / `posts_content_check`） |
 | created_at | timestamptz | DEFAULT now() | 投稿日時 |
+
+```sql
+alter table posts
+  add constraint posts_content_check
+  check (
+    char_length(content) <= 500
+    and btrim(content, E' \t\n\r　') <> ''
+  );
+```
+
+※上記の CHECK 制約は本番DBへの適用が必要（未適用の場合は投稿画面で保存が失敗しうる）。
 
 ### リレーション
 

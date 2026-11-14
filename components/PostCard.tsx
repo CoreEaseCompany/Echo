@@ -1,23 +1,12 @@
-
 "use client";
 
 import Link from "next/link";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-type Post = {
-  id: number;
-  user_id: string;
-  content: string;
-};
-
-type Tag = {
-  id: number;
-  name: string;
-};
+import type { Post, Tag } from "@/lib/types";
 
 type Props = {
-  post: Post;
+  post: Pick<Post, "id" | "user_id" | "content">;
   userId: string;
   username: string;
   tags: Tag[];

@@ -1,42 +1,54 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import { fetchTags } from "@/lib/tags";
+import type { Tag } from "@/lib/types";
 
-type Tag = {
-  id: number;
-  name: string;
-};
+const MAX_LENGTH = 500;
 
 export default function PostPage() {
+  const [userId, setUserId] = useState<string | null>(null);
   const [content, setContent] = useState("");
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  // 投稿は保存済みだがタグ設定に失敗し、取り消しもできなかった状態
+  const [savedWithoutTags, setSavedWithoutTags] = useState(false);
 
   const router = useRouter();
 
-  // タグ一覧を取得
+  // ログイン確認 → タグ一覧を取得
   useEffect(() => {
-    const getTags = async () => {
-      const { data, error } = await supabase
-        .from("tags")
-        .select("id, name")
-        .order("id");
+    const init = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      if (error) {
-        alert("タグの取得に失敗しました: " + error.message);
+      if (!user) {
         setLoading(false);
         return;
       }
 
-      setTags(data ?? []);
+      setUserId(user.id);
+
+      const { data, error } = await fetchTags();
+
+      if (error) {
+        console.error(error);
+        setMessage("タグの取得に失敗しました");
+      } else {
+        setTags(data ?? []);
+      }
+
       setLoading(false);
     };
 
-    getTags();
+    init();
   }, []);
 
   // タグの選択・解除
@@ -50,18 +62,31 @@ export default function PostPage() {
 
   // 投稿処理
   const handlePost = async () => {
-    if (!content.trim()) {
-      alert("投稿内容を入力してください");
+    if (submitting || savedWithoutTags) return;
+
+    const trimmed = content.trim();
+
+    if (!trimmed) {
+      setMessage("投稿内容を入力してください");
       return;
     }
 
-    // ログインユーザー取得
+    if (content.length > MAX_LENGTH) {
+      setMessage(`投稿内容は${MAX_LENGTH}文字以内で入力してください`);
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage("");
+
+    // ログインユーザーを再確認(user_id は必ずこの値を使う)
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
-      alert("ログインしてください");
+      setMessage("ログインしてください");
+      setSubmitting(false);
       return;
     }
 
@@ -70,13 +95,19 @@ export default function PostPage() {
       .from("posts")
       .insert({
         user_id: user.id,
-        content: content.trim(),
+        content: trimmed,
       })
       .select("id")
       .single();
 
     if (postError || !post) {
-      alert(postError?.message ?? "投稿に失敗しました");
+      console.error(postError);
+      setMessage(
+        postError?.code === "23514"
+          ? `投稿内容は${MAX_LENGTH}文字以内で入力してください`
+          : "投稿に失敗しました。もう一度お試しください"
+      );
+      setSubmitting(false);
       return;
     }
 
@@ -92,56 +123,106 @@ export default function PostPage() {
         .insert(postTags);
 
       if (tagError) {
-        alert(
-          "投稿は保存されましたが、タグの保存に失敗しました: " +
-            tagError.message
-        );
-        router.push("/");
+        console.error(tagError);
+
+        // 投稿だけが残らないよう、保存した投稿を取り消す
+        const { error: deleteError } = await supabase
+          .from("posts")
+          .delete()
+          .eq("id", post.id);
+
+        if (deleteError) {
+          console.error(deleteError);
+          // 取り消しも失敗した場合は、重複投稿を防ぐため再送信不可にする
+          setSavedWithoutTags(true);
+          setMessage(
+            "投稿は保存されましたが、タグを設定できませんでした。再投稿はしないでください"
+          );
+        } else {
+          setMessage("投稿に失敗しました。もう一度お試しください");
+        }
+
+        setSubmitting(false);
         return;
       }
     }
 
-    alert("投稿しました");
     router.push("/");
   };
 
+  if (loading) {
+    return (
+      <section className="post-form post-form--state">
+        <p>読み込み中...</p>
+      </section>
+    );
+  }
+
+  if (!userId) {
+    return (
+      <section className="post-form post-form--state">
+        <p>ログインしてください</p>
+        <Link href="/login" className="post-form__link">
+          ログインページへ
+        </Link>
+      </section>
+    );
+  }
+
+  const isEmpty = content.trim() === "";
+
   return (
-    <main>
-      <h1>投稿作成</h1>
+    <section className="post-form">
+      <h1 className="post-form__title">投稿作成</h1>
 
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="今の気持ちを書いてみよう..."
-        rows={5}
-      />
+      <div className="post-form__field">
+        <textarea
+          className="post-form__input"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          maxLength={MAX_LENGTH}
+          placeholder="今の気持ちを書いてみよう..."
+          rows={12}
+          aria-label="投稿内容"
+        />
+        <p className="post-form__count">
+          {content.length}/{MAX_LENGTH}
+        </p>
+      </div>
 
-      <h2>タグ</h2>
+      <div className="post-form__tags">
+        {tags.length === 0 ? (
+          <p className="post-form__tags-empty">利用できるタグがありません。</p>
+        ) : (
+          tags.map((tag) => {
+            const active = selectedTagIds.includes(tag.id);
+            return (
+              <button
+                key={tag.id}
+                type="button"
+                className={`home-tag-button${active ? " active" : ""}`}
+                aria-pressed={active}
+                onClick={() => handleTagChange(tag.id)}
+              >
+                {tag.name}
+              </button>
+            );
+          })
+        )}
+      </div>
 
-      {loading ? (
-        <p>タグを読み込み中...</p>
-      ) : tags.length === 0 ? (
-        <p>利用できるタグがありません。</p>
-      ) : (
-        <div>
-          {tags.map((tag) => (
-            <label key={tag.id} style={{ marginRight: "12px" }}>
-              <input
-                type="checkbox"
-                checked={selectedTagIds.includes(tag.id)}
-                onChange={() => handleTagChange(tag.id)}
-              />
-              {tag.name}
-            </label>
-          ))}
-        </div>
-      )}
+      <div className="post-form__footer">
+        <button
+          type="button"
+          className="post-form__submit"
+          onClick={handlePost}
+          disabled={submitting || savedWithoutTags || isEmpty}
+        >
+          {submitting ? "投稿中..." : "投稿"}
+        </button>
+      </div>
 
-      <br />
-
-      <button onClick={handlePost} disabled={loading}>
-        投稿
-      </button>
-    </main>
+      {message && <p className="post-form__message">{message}</p>}
+    </section>
   );
 }

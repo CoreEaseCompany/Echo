@@ -1,51 +1,46 @@
-
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { normalizeTags } from "@/lib/tags";
+import type { JoinedTags } from "@/lib/tags";
+import type { Comment, Empathy, Post, Tag } from "@/lib/types";
+import { getUserColor } from "@/lib/userColor";
 
-type Tag = {
-  id: number;
-  name: string;
+const MAX_LENGTH = 500;
+
+type PostWithEmpathies = Post & {
+  empathies: Empathy[];
 };
 
-type Post = {
-  id: number;
-  user_id: string;
-  content: string;
-  created_at: string;
-  empathies: {
-    id: number;
-    user_id: string;
-  }[];
-};
-
-type Comment = {
-  id: number;
-  user_id: string;
-  content: string;
-  created_at: string;
-};
-
-type Profile = {
-  user_id: string;
-  username: string | null;
-};
+// 同じ id のメッセージが既にあれば追加しない（送信の返り値と Realtime の重複対策）
+function appendComment(comments: Comment[], added: Comment): Comment[] {
+  return comments.some((comment) => comment.id === added.id)
+    ? comments
+    : [...comments, added];
+}
 
 export default function PostDetail() {
   const params = useParams();
-  const id = params.id as string;
+  const id = Number(params.id as string);
 
-  const [post, setPost] = useState<Post | null>(null);
+  const [post, setPost] = useState<PostWithEmpathies | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
-  const [commentContent, setCommentContent] = useState("");
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState("");
+  const [sending, setSending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
+  const messagesRef = useRef<HTMLDivElement>(null);
+  // 最下部付近を表示しているときだけ、新着で自動スクロールする
+  const stickToBottomRef = useRef(true);
+
+  // 初期データの取得
   useEffect(() => {
     const getData = async () => {
       // ログインユーザーを取得
@@ -53,9 +48,12 @@ export default function PostDetail() {
         data: { user },
       } = await supabase.auth.getUser();
 
-      if (user) {
-        setUserId(user.id);
+      if (!user) {
+        setLoading(false);
+        return;
       }
+
+      setUserId(user.id);
 
       // 投稿を取得
       const { data: postData, error: postError } = await supabase
@@ -67,7 +65,7 @@ export default function PostDetail() {
             user_id
           )
         `)
-        .eq("id", Number(id))
+        .eq("id", id)
         .single();
 
       if (postError) {
@@ -78,33 +76,28 @@ export default function PostDetail() {
 
       setPost(postData);
 
-      // 投稿に紐づくタグを取得
+      // タグを取得
       const { data: tagData, error: tagError } = await supabase
         .from("post_tags")
         .select("tags(id, name)")
-        .eq("post_id", Number(id));
+        .eq("post_id", id);
 
       if (tagError) {
         console.error(tagError);
       } else {
-        const fetchedTags = (
-          (tagData ?? []) as unknown as {
-            tags: Tag | Tag[] | null;
-          }[]
-        ).flatMap((item) =>
-          Array.isArray(item.tags) ? item.tags : item.tags ? [item.tags] : []
+        setTags(
+          ((tagData ?? []) as unknown as { tags: JoinedTags }[]).flatMap(
+            (item) => normalizeTags(item.tags)
+          )
         );
-
-        setTags(fetchedTags);
       }
 
-      // コメントを取得
-      const { data: commentData, error: commentError } =
-        await supabase
-          .from("comments")
-          .select("*")
-          .eq("post_id", Number(id))
-          .order("created_at", { ascending: true });
+      // 既存のコメントをメッセージ履歴として取得
+      const { data: commentData, error: commentError } = await supabase
+        .from("comments")
+        .select("*")
+        .eq("post_id", id)
+        .order("created_at", { ascending: true });
 
       if (commentError) {
         console.error(commentError);
@@ -112,32 +105,58 @@ export default function PostDetail() {
         setComments(commentData ?? []);
       }
 
-      // 投稿者とコメント投稿者のIDをまとめる
-      const userIds = [
-        ...new Set([
-          postData.user_id,
-          ...(commentData ?? []).map((comment) => comment.user_id),
-        ]),
-      ];
-
-      // プロフィールを取得
-      const { data: profileData, error: profileError } =
-        await supabase
-          .from("profiles")
-          .select("user_id, username")
-          .in("user_id", userIds);
-
-      if (profileError) {
-        console.error(profileError);
-      } else {
-        setProfiles(profileData ?? []);
-      }
-
       setLoading(false);
     };
 
     getData();
   }, [id]);
+
+  // 他ユーザーの新着メッセージを購読する
+  const postId = post?.id;
+
+  useEffect(() => {
+    if (!postId) return;
+
+    const channel = supabase
+      .channel(`post-chat-${postId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "comments",
+          filter: `post_id=eq.${postId}`,
+        },
+        (payload) => {
+          setComments((current) =>
+            appendComment(current, payload.new as Comment)
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [postId]);
+
+  // 新着時の自動スクロール
+  useEffect(() => {
+    const element = messagesRef.current;
+
+    if (element && stickToBottomRef.current) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [comments, loading]);
+
+  // スクロール位置が最下部付近かを記録する
+  const handleScroll = () => {
+    const element = messagesRef.current;
+    if (!element) return;
+
+    stickToBottomRef.current =
+      element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+  };
 
   // 共感済みかどうか
   const hasEmpathy =
@@ -147,12 +166,12 @@ export default function PostDetail() {
 
   // 共感ボタン
   const handleEmpathy = async () => {
-    if (!userId) {
-      alert("ログインしてください");
+    if (!userId || !post) {
+      setErrorMessage("ログインしてください");
       return;
     }
 
-    if (!post) return;
+    setErrorMessage("");
 
     if (hasEmpathy) {
       const { error } = await supabase
@@ -162,7 +181,8 @@ export default function PostDetail() {
         .eq("user_id", userId);
 
       if (error) {
-        alert(error.message);
+        console.error(error);
+        setErrorMessage("共感を取り消せませんでした。");
         return;
       }
 
@@ -183,7 +203,8 @@ export default function PostDetail() {
         .single();
 
       if (error) {
-        alert(error.message);
+        console.error(error);
+        setErrorMessage("共感できませんでした。");
         return;
       }
 
@@ -194,60 +215,64 @@ export default function PostDetail() {
     }
   };
 
-  // コメント投稿
-  const handleComment = async () => {
-    if (!userId) {
-      alert("ログインしてください");
+  // メッセージ送信
+  const handleSend = async () => {
+    const trimmed = input.trim();
+
+    if (!userId || !post) {
+      setErrorMessage("ログインしてください");
       return;
     }
 
-    if (!commentContent.trim() || !post) {
-      alert("コメントを入力してください");
-      return;
-    }
+    if (!trimmed || sending) return;
+
+    setSending(true);
+    setErrorMessage("");
+    stickToBottomRef.current = true;
 
     const { data, error } = await supabase
       .from("comments")
       .insert({
         user_id: userId,
         post_id: post.id,
-        content: commentContent.trim(),
+        content: trimmed,
       })
       .select()
       .single();
 
+    setSending(false);
+
     if (error) {
-      alert(error.message);
+      console.error(error);
+      setErrorMessage("送信できませんでした。時間をおいて再度お試しください。");
       return;
     }
 
-    setComments((current) => [...current, data]);
-
-    // 自分のプロフィールが未取得なら取得
-    if (!profiles.some((profile) => profile.user_id === userId)) {
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("user_id, username")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (profileData) {
-        setProfiles((current) => [...current, profileData]);
-      }
-    }
-
-    setCommentContent("");
+    // 自分の送信分は返り値で追加する
+    setComments((current) => appendComment(current, data));
+    setInput("");
   };
 
-  // コメント削除
+  // Enter で送信、Shift+Enter で改行
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  // メッセージ削除（自分のものだけ）
   const handleDeleteComment = async (commentId: number) => {
+    setErrorMessage("");
+
     const { error } = await supabase
       .from("comments")
       .delete()
       .eq("id", commentId);
 
     if (error) {
-      alert(error.message);
+      console.error(error);
+      setErrorMessage("削除できませんでした。");
       return;
     }
 
@@ -257,115 +282,153 @@ export default function PostDetail() {
   };
 
   if (loading) {
-    return <p>読み込み中...</p>;
+    return (
+      <section className="chat-room chat-room--state">
+        <p className="chat-room__state">読み込み中...</p>
+      </section>
+    );
+  }
+
+  if (!userId) {
+    return (
+      <section className="chat-room chat-room--state">
+        <p className="chat-room__state">チャットに参加するにはログインが必要です。</p>
+        <Link href="/login" className="chat-room__link">
+          ログイン画面へ
+        </Link>
+      </section>
+    );
   }
 
   if (!post) {
-    return <p>投稿が見つかりません。</p>;
+    return (
+      <section className="chat-room chat-room--state">
+        <p className="chat-room__state">投稿が見つかりません。</p>
+        <Link href="/" className="chat-room__link">
+          ← 投稿一覧へ戻る
+        </Link>
+      </section>
+    );
   }
 
-  // ユーザーIDからユーザー名を取得する関数
-  const getUsername = (targetUserId: string) => {
-    return (
-      profiles.find(
-        (profile) => profile.user_id === targetUserId
-      )?.username || "名前未設定"
-    );
-  };
-
   return (
-    <main>
-      <h1>投稿詳細</h1>
+    <section className="chat-room">
+      {/* ヘッダー：タイトル・タグ・共感 */}
+      <header className="chat-room__header">
+        <h1 className="chat-room__title">{post.content}</h1>
 
-      {/* 投稿者情報 */}
-      <p>
-        投稿者：
-        <Link href={`/profile/${post.user_id}`}>
-          {getUsername(post.user_id)}
-        </Link>
-      </p>
+        {tags.length > 0 && (
+          <ul className="chat-room__tags">
+            {tags.map((tag) => (
+              <li key={tag.id} className="chat-room__tag">
+                #{tag.name}
+              </li>
+            ))}
+          </ul>
+        )}
 
-      {/* 投稿内容 */}
-      <p>{post.content}</p>
-
-      {/* タグ表示 */}
-      {tags.length > 0 && (
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          {tags.map((tag) => (
-            <span
-              key={tag.id}
-              style={{
-                backgroundColor: "#e5e7eb",
-                color: "#374151",
-                padding: "4px 10px",
-                borderRadius: "16px",
-                fontSize: "12px",
-              }}
-            >
-              #{tag.name}
-            </span>
-          ))}
+        <div className="chat-room__empathy">
+          <span>共感数：{post.empathies.length}</span>
+          <button
+            type="button"
+            className="chat-room__button"
+            onClick={handleEmpathy}
+          >
+            {hasEmpathy ? "共感を取り消す" : "共感する"}
+          </button>
         </div>
-      )}
+      </header>
 
-      {/* 投稿日時 */}
-      <p>{new Date(post.created_at).toLocaleString("ja-JP")}</p>
+      {/* メッセージ一覧（この領域だけスクロール） */}
+      <div
+        className="chat-room__messages"
+        ref={messagesRef}
+        onScroll={handleScroll}
+      >
+        {comments.length === 0 && (
+          <p className="chat-room__empty">まだメッセージはありません。</p>
+        )}
 
-      {/* 共感数 */}
-      <p>共感数：{post.empathies.length}</p>
+        {comments.map((comment) => {
+          const isMine = comment.user_id === userId;
 
-      {/* 共感ボタン */}
-      <button onClick={handleEmpathy}>
-        {hasEmpathy ? "共感を取り消す" : "共感する"}
-      </button>
+          return (
+            <div
+              key={comment.id}
+              className={`chat-message${isMine ? " chat-message--mine" : ""}`}
+            >
+              <span
+                className="chat-message__avatar"
+                style={{ backgroundColor: getUserColor(comment.user_id) }}
+                aria-hidden="true"
+              />
 
-      {/* コメント */}
-      <h2>コメント</h2>
+              <div className="chat-message__body">
+                <p className="chat-message__text">{comment.content}</p>
 
-      {comments.length === 0 ? (
-        <p>まだコメントはありません。</p>
-      ) : (
-        comments.map((comment) => (
-          <div key={comment.id}>
-            <p>
-              <Link href={`/profile/${comment.user_id}`}>
-                {getUsername(comment.user_id)}
-              </Link>
-            </p>
+                <div className="chat-message__meta">
+                  <small>
+                    {new Date(comment.created_at).toLocaleTimeString("ja-JP", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </small>
 
-            <p>{comment.content}</p>
-
-            <small>
-              {new Date(comment.created_at).toLocaleString("ja-JP")}
-            </small>
-
-            {comment.user_id === userId && (
-              <button onClick={() => handleDeleteComment(comment.id)}>
-                削除
-              </button>
-            )}
-
-            <hr />
-          </div>
-        ))
-      )}
-
-      {/* コメント入力 */}
-      <div>
-        <textarea
-          value={commentContent}
-          onChange={(e) => setCommentContent(e.target.value)}
-          placeholder="コメントを入力してください"
-        />
-
-        <button onClick={handleComment}>
-          コメントする
-        </button>
+                  {isMine && (
+                    <button
+                      type="button"
+                      className="chat-message__delete"
+                      onClick={() => handleDeleteComment(comment.id)}
+                    >
+                      削除
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      <Link href="/">
-        ← 投稿一覧へ戻る
-      </Link>
-    </main>
+      {errorMessage && (
+        <p className="chat-room__error" role="alert">
+          {errorMessage}
+        </p>
+      )}
+
+      {/* 入力欄（下部固定） */}
+      <form
+        className="chat-room__form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSend();
+        }}
+      >
+        <textarea
+          className="chat-room__input"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          maxLength={MAX_LENGTH}
+          rows={2}
+          placeholder="メッセージを入力（Enterで送信 / Shift+Enterで改行）"
+          disabled={sending}
+        />
+
+        <div className="chat-room__form-footer">
+          <span className="chat-room__count">
+            {input.length}/{MAX_LENGTH}
+          </span>
+
+          <button
+            type="submit"
+            className="chat-room__button"
+            disabled={sending || !input.trim()}
+          >
+            {sending ? "送信中..." : "送信"}
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }

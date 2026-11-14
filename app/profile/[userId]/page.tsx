@@ -1,29 +1,19 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import type { Post, Profile } from "@/lib/types";
 
-type Profile = {
-  user_id: string;
-  username: string | null;
-  bio: string | null;
-};
-
-type Post = {
-  id: number;
-  content: string;
-  created_at: string;
-};
+type PostSummary = Pick<Post, "id" | "content" | "created_at">;
 
 export default function PublicProfilePage() {
   const params = useParams();
   const userId = params.userId as string;
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<PostSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -72,20 +62,20 @@ export default function PublicProfilePage() {
   }, [userId]);
 
   if (loading) {
-    return <main>読み込み中...</main>;
+    return <div>読み込み中...</div>;
   }
 
   if (!profile) {
     return (
-      <main>
+      <div>
         <p>{message || "プロフィールが見つかりません"}</p>
         <Link href="/">投稿一覧へ戻る</Link>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main>
+    <div>
       <h1>{profile.username || "名前未設定"}</h1>
 
       <h2>自己紹介</h2>
@@ -112,6 +102,6 @@ export default function PublicProfilePage() {
       )}
 
       <Link href="/">投稿一覧へ戻る</Link>
-    </main>
+    </div>
   );
 }

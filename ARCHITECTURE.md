@@ -706,6 +706,9 @@ Echo/
 |
 +-- lib/
 |   +-- supabase.ts
+|   +-- tags.ts
+|   +-- types.ts
+|   +-- userColor.ts
 |
 +-- public/
 |   +-- images/
@@ -749,6 +752,9 @@ Echo/
 | ファイル | 責務 |
 |---|---|
 | supabase.ts | Supabase Clientの初期化 |
+| tags.ts | タグ一覧の取得・結合取得したタグの整形 |
+| types.ts | 共通のデータ型（Post / Tag / Profile など） |
+| userColor.ts | ユーザーIDからアイコン色を決定 |
 
 今後、共通のデータ取得処理やユーティリティを追加する場合も、責務に応じて整理する。
 
