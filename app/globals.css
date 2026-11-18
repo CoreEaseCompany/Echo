@@ -552,6 +552,13 @@ body::before {
   height: 28px;
   border-radius: 50%;
   box-shadow: 0 0 6px rgba(255, 255, 255, 0.25);
+  display: block;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.chat-message__avatar:hover {
+  filter: brightness(1.2);
 }
 
 .chat-message__body {

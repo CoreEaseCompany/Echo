@@ -357,10 +357,12 @@ export default function PostDetail() {
               key={comment.id}
               className={`chat-message${isMine ? " chat-message--mine" : ""}`}
             >
-              <span
+              <Link
+                href={`/profile/${comment.user_id}`}
+                prefetch={false}
                 className="chat-message__avatar"
                 style={{ backgroundColor: getUserColor(comment.user_id) }}
-                aria-hidden="true"
+                aria-label="プロフィールを見る"
               />
 
               <div className="chat-message__body">

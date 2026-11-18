@@ -1,128 +1,164 @@
-# Echo 公開前監査レポート（調査のみ・コード変更なし）
+# Echo 公開前監査レポート（調査のみ・コード/DB/ファイルは未変更）
 
-凡例: **[確認済]**=コード/ドキュメントを実際に読んで確認 / **[推測]**=コードからの推論 / **[未確認]**=Supabase側設定・実機動作など確認不能
-※ `npm run lint` / `npm run build` / 実機表示は実行していない（[未確認]）。
+調査日: 2026-11-15（コミット 36641f0 時点、git は clean）
+
+凡例: **[確認済]**=コードを実際に読んで確認 / **[推測]**=コードからの推論 / **[未確認]**=Supabase側設定・実機動作など確認不能
+
+実施した確認: 全 `app/` `components/` `lib/` と `globals.css`(937行)・`TASKS.md`・`DATABASE.md` 主要部を通読。`npx eslint` は出力なし（エラー/警告なし）[確認済]。`next build`・実機表示・`npm audit` は未実行 [未確認]。
 
 ---
 
 ## 1. 現在のプロジェクトの状態
 
 ### 構成 [確認済]
-- Next.js 16.2.7 + React 19 + Supabase(JS v2) + Tailwind v4。サーバーなし、全ページ `"use client"` でブラウザから直接Supabaseを呼ぶ構成。
-- ファイル: `app/layout.tsx`, `app/page.tsx`(ホーム/タグ検索), `app/post/page.tsx`(作成), `app/post/[id]/page.tsx`(詳細・共感・コメント), `app/profile/page.tsx`(自分), `app/profile/[userId]/page.tsx`(公開), `app/login|register|reset-password(/update)/page.tsx`, `components/Header.tsx`, `components/PostCard.tsx`, `lib/supabase.ts`, `app/globals.css`(489行)。
-- 空ディレクトリ: `hooks/`, `styles/`, `types/`, `docs/plans/features/`。型定義は各ファイルにローカル重複（`Tag`が4ファイル、`Profile`が4ファイル、`Post`が3ファイル）。
-- 未コミット: `app/globals.css`（左列カードずれの修正途中: `left:±20px`除去→`padding-inline`化）、`docs/`（修正方針md）。TASKS.mdでも「カード位置ずれ」は進行中。
+Next.js 16.2.7 / React 19 / Supabase JS v2 / Tailwind v4。全ページ `"use client"`、ブラウザから Supabase を直接呼ぶ構成（サーバー側ロジック・middleware なし）。
 
-### 機能別実装状況 [確認済]
-| 機能 | 状態 | 備考 |
-|---|---|---|
-| 認証 | 動作する実装あり | 登録/ログイン/ログアウト/リセットメール/新PW設定まで存在。入力検証・ローディングは貧弱（後述） |
-| 投稿 | 作成・一覧・詳細・編集(PostCardのみ)・削除(ホームのみ) | 詳細画面に編集/削除なし |
-| コメント | 投稿・一覧・本人削除 | 文字数制限なし |
-| 共感 | 追加/解除/数表示は**詳細画面のみ** | ホームのカードに共感数・コメント数なし |
-| プロフィール | 自分の編集・公開表示 | 登録時にprofiles行が作られず、`/profile`で保存するまで「名前未設定」 |
-| タグ | 投稿時選択・一覧表示・絞り込み | タグ新規作成UIなし（仕様どおりと推測） |
+| ファイル | 役割 |
+|---|---|
+| `app/layout.tsx` | 共通レイアウト（雲SVGフィルタ・Header・`<main class=app-main>`・固定フッター） |
+| `app/page.tsx` | ホーム：タグ絞り込み＋投稿グリッド＋削除 |
+| `app/post/page.tsx` | 投稿作成（タグ選択） |
+| `app/post/[id]/page.tsx` | 投稿詳細＝チャット画面（共感・コメント・Realtime購読） |
+| `app/profile/page.tsx` / `[userId]/page.tsx` | 自分のプロフィール編集 / 他ユーザー閲覧 |
+| `app/login` `register` `reset-password(/update)` | 認証系 |
+| `components/Header.tsx` `PostCard.tsx` | ヘッダー（認証状態監視）/ 投稿カード（編集UI内蔵） |
+| `lib/supabase.ts` `types.ts` `tags.ts` `userColor.ts` | クライアント / 共通型 / タグ取得 / ID→色 |
+
+不自然な点: `post/[id]/page.tsx` が434行で取得・Realtime・共感・送信・描画を1ファイルに集約（責務の偏り）。`PostCard` は編集の DB 更新まで内包。型は `lib/types.ts` に集約済み。
+
+### 機能別の状況
+| 機能 | 状態 |
+|---|---|
+| 認証 | 登録/ログイン/ログアウト/リセット要求/新PW設定が存在。動作は実機[未確認]。バリデーション・ローディング・UIが貧弱 |
+| 投稿 | 作成（500字・タグ・失敗時ロールバック・二重送信防止あり）/一覧/編集(PostCard)/削除(ホームのみ)。**編集に文字数上限・削除に確認なし** |
+| コメント | チャット形式で送信/削除/Realtime受信。**投稿者名・プロフィールへのリンクなし**、他者の削除は同期されない |
+| 共感 | 追加/解除/件数は**詳細画面のみ**。処理中ガードなし |
+| プロフィール | 自分の編集（upsert、重複名エラー処理）良好。公開側 `/profile/[userId]` は**完全に未スタイル** |
+| タグ | 取得・選択・表示・絞り込みは動作する実装。競合/件数上限に弱い |
 
 ---
 
-## 2〜3. 問題点一覧と重要度
+## 2・3. 問題点一覧と重要度
 
 ### 高
 | # | 問題 | 根拠 |
 |---|---|---|
-| H1 | **ホーム以外の全ページがスクロール不能・内容が切れる** | `globals.css` の `body{overflow:hidden}`、`.app-main{height:0; overflow:hidden}`、`layout.tsx:70`。ホームだけ内部に`.post-grid-scroll`を持つ。投稿詳細(コメント多数)、投稿作成、プロフィール(投稿一覧)は画面高を超えると見えなくなる [確認済(CSS)/実機未確認]。スマホでは特に顕著 |
-| H2 | **RLSの実設定が未検証** | DATABASE.md §5に方針/SQLはあるが、Supabase実体は確認不能 [未確認]。TASKS.md優先度Aでも未チェック。全データアクセスがクライアント直叩きのため、RLSが唯一の防御線 |
-| H3 | **DB側の制約が文書上ほぼ無い** | DATABASE.md の posts/comments の `content text not null` のみ。空白のみ/長さ上限のCHECKなし。クライアント検証はバイパス可能（文字数上限は`profile`のmaxLengthのみ）。投稿・コメントに上限なし→巨大データ投入可 [確認済(文書)/実DBは未確認] |
-| H4 | **メール確認フローの扱いが未定義** | `register/page.tsx` は成功時に無言で `/login` へ遷移。Supabase側で確認メール必須なら案内なしでログイン失敗する。本番のRedirect URL設定も未確認 [未確認] |
+| H1 | **RLS・DB制約・Realtime設定の実体が未検証** | 全アクセスがクライアント直叩きでRLSが唯一の防御線。DATABASE.md §5 は方針とSQLのみ。`posts_content_check` は「本番DBへの適用が必要（未適用なら保存が失敗しうる）」と文書自身が注記（DATABASE.md:101-112）。コメントはCHECKなし（DATABASE.md:195-205）で、`post-chat-room.md:113` に案はあるが文書未反映。コメントのRealtime（`app/post/[id]/page.tsx:117-141`）は publication 設定とSELECTポリシーが前提だが DATABASE.md に記載なし。TASKS優先度Aの検証項目はすべて未チェック。**Supabase側は未確認** |
+| H2 | **登録後のメール確認フロー・本番Redirect URLが未整備** | `register/page.tsx:13-26` は成功時に無言で `/login` へ。確認メール必須設定なら案内なしでログイン失敗する（REQUIREMENTS:79 は本人確認を要求）。`reset-password` は `window.location.origin` 依存（`reset-password/page.tsx:22`）で、本番URLをSupabaseに登録しないと失敗 [未確認] |
+| H3 | **未ログイン時の挙動が公開サイトとして不適切** | RLSは `to authenticated`。未ログインのホームは取得が空になり「該当する投稿はありません。」と表示（`app/page.tsx:215`）＝取得失敗/未ログイン/本当に0件が区別不能。ログイン誘導なし。詳細は `post/[id]/page.tsx:292-301` でログイン要求（これは明示的で良い） |
+| H4 | **通報・ブロック・利用規約/プライバシーが皆無** | 悩み・感情を扱う匿名SNS。REQUIREMENTS:481-485 / TASKS優先度C扱い。公開判断としては運営リスク [推測] |
 
 ### 中
 | # | 問題 | 根拠 |
 |---|---|---|
-| M1 | 未ログインでの閲覧挙動が不明瞭 | RLSは `to authenticated`（DATABASE.md）。未ログインのホームは空配列扱いで「該当する投稿はありません。」と表示され、ログイン誘導なし。公開閲覧の仕様がREQUIREMENTSと一致するか要確認 |
-| M2 | 投稿＋タグ保存が非トランザクション | `post/page.tsx:69-102`。タグ保存失敗時、投稿だけ残りalertで通知後に遷移 |
-| M3 | 投稿作成の二重送信対策なし | `post/page.tsx:142` ボタンは`loading`（タグ取得状態）のみで無効化。連打で重複投稿 |
-| M4 | タグ絞り込みのレース条件 | `app/page.tsx:179-186` 連続クリックで古いレスポンスが後から上書きし得る。`.in("id", postIds)`は件数増でURL長超過の恐れ |
-| M5 | 全件取得（ページネーションなし） | `app/page.tsx:102-111` `select("*")` 無制限。TASKSでも優先度C扱い。公開後データ増で劣化 |
-| M6 | エラー処理が`alert()`と`console.error`中心 | `post/[id]`の`alert(error.message)`は内部エラー文言をそのままユーザーに露出。ホームは取得失敗時に画面表示なし(空表示と区別不能) |
-| M7 | 認証画面の検証不足 | `register`: PW長・メール形式チェックなし、二重送信防止なし、ローディングなし。`login`: Enterキー送信不可（`<form>`でない）。`reset-password/update`: リカバリセッションの有無を事前確認せず、失敗時に初めてエラー |
-| M8 | 認証依存画面にガードなし | `/post`, `/profile`はログイン確認が送信時のみ。未ログインでもフォーム表示。middleware/Server側チェックなし（クライアント直結構成のため設計上の特性） |
-| M9 | 詳細・フォーム画面が未スタイル/インラインstyle | `post/[id]/page.tsx:293-306`にインラインstyle(`#e5e7eb`)、他は素のHTML。ホームのガラス調デザインと不一致。暗背景に素のinput/button |
-| M10 | `<main>`の入れ子 | `layout.tsx:70`の`<main>`内に各ページが`<main>`を出力（HTML仕様違反・a11y）。 |
-| M11 | テスト皆無 | テストファイル/設定なし、`package.json`に`test`スクリプトなし [確認済] |
-| M12 | 登録時にprofile未作成（匿名名なし） | 投稿者が「名前未設定」で並ぶ。DB trigger有無は未確認 [未確認]（DATABASE.mdにtrigger記載なし） |
+| M1 | 認証4画面が未スタイル・検証不足 | `login` `register` `reset-password*` は素のHTML（クラスなし、`<br/>`改行）。暗い背景画像上でホーム/プロフィール/投稿画面と見た目が断絶。`login`: `<form>`でなくEnter送信不可・ローディングなし・二重送信可。`register`: PW長/メール形式検証なし・`alert(error.message)` で内部文言露出（`register/page.tsx:20`）・二重送信可。`reset-password/update`: リカバリセッション確認なし、成功後に遷移せず（`update/page.tsx:46-48`） |
+| M2 | 公開プロフィール `/profile/[userId]` が完全未スタイル | `profile/[userId]/page.tsx` 全体が素の div/h1/hr。投稿への遷移はあるが体裁・余白なし |
+| M3 | 投稿削除が確認なしで即実行 | `PostCard.tsx:147` → `app/page.tsx:162-174`。誤クリックで消える。失敗は `alert`。削除ボタン類は `type` 未指定 |
+| M4 | 投稿編集に文字数上限なし＋エラー文言露出 | `PostCard.tsx:89-95`（maxLength なし）、`:63` `alert(error.message)`。DB CHECK 適用後は501字以上で保存失敗しPostgresの生メッセージが出る（post-create-screen.md:159 も既知として記載） |
+| M5 | コメント投稿者が不明 | `post/[id]/page.tsx:360-367` は色アバターのみ。TASKS「コメント投稿者名からプロフィールへの遷移 [x]」と**不一致**（匿名性重視の設計変更なら文書側を更新すべき、設計は変えない） |
+| M6 | 全件取得・タグ絞り込みの競合・URL長 | `app/page.tsx:49-58` limit なし `select("*")`。`:151-159` 連打で古い応答が後勝ちし得る（リクエスト識別なし）。`:55` `.in("id", postIds)` は件数増でURL長超過の恐れ。TASKSではCだが公開後すぐ効く [推測] |
+| M7 | エラー処理が3系統混在 | `alert`（Header/PostCard/home/login/register）、画面内メッセージ（post/profile/chat）、`console.error` のみ（ホームの取得失敗は画面表示なし）。TASKS優先度A「エラー表示を統一」が未了 |
+| M8 | ログイン必須ページに事前ガードなし | `/post` `/profile` はクライアントで `getUser` 後に出し分け（`post/page.tsx:161`, `profile/page.tsx:100`）で実害は小さいが、未認証時のホームは上記H3。middleware 無し構成の特性 |
+| M9 | 共感処理の二重クリック/古い state | `post/[id]/page.tsx:168-216` 処理中フラグなし、`setPost({...post,...})` が古い値を掴む可能性。DBのUNIQUEで致命傷にはならないがエラー表示になる |
+| M10 | レスポンシブの穴（実機[未確認]） | `≤700px` でヘッダー `min-height:150px`、ログイン時は5要素のナビ＋メールを `absolute; bottom:12px` に押し込む（globals.css:666-691）。長いメールで折返し/ロゴ重なりの可能性 [推測]。`.app-main margin-bottom:49px` はフッター高の決め打ち（:44）。`.post-card` は `height:220px` 固定＋22px固定（:247,343）。チャットは `height:calc(100% - 24px)`（:438）で、親 `height:0; flex:1` に依存 [推測]。スマホのキーボード表示時の入力欄挙動は未確認 |
+| M11 | テストなし・CI なし | `package.json` に test スクリプト・テストファイルなし [確認済] |
+| M12 | profiles 自動作成なし | 登録時に行が作られず、`/profile` 保存まで「名前未設定」表示（`app/page.tsx:228`）。DB trigger の有無は未確認 |
 
 ### 低
 | # | 問題 | 根拠 |
 |---|---|---|
-| L1 | 未使用コード | `app/page.tsx`: `email`状態・`Link`import未使用。`.home-login-info`はCSSのみで未使用。`useState`のemail取得も無駄なAPI呼び出し |
-| L2 | CSS重複/残骸 | `globals.css:250-257` 「投稿カード」見出しが重複。`.site-footer-label, .home-tag-area h2`の色指定と`.home-tag-area h2`の再指定が重複(58-62 / 177-182)。`.home-main`等の命名が一貫（BEM/ハイフン混在: `post-card__*`と`home-*`）。TASKSの`cloud-card`は現CSSに**存在せず**残存なし [確認済] |
-| L3 | フォント指定が無効 | `layout.tsx`でGeistを読み込むが、`body{font-family:sans-serif}`が上書きし未使用。日本語サイトにlatinサブセットのみ |
-| L4 | レスポンシブの穴 | ヘッダー: 700px以下で`min-height:150px`固定の絶対配置ナビ、メール表示が長いと折返し/重なりの可能性 [推測]。`.post-card`は`height:220px`固定、`font-size:22px`固定で長文/英数字は3行クランプで切れる(詳細ページへ誘導のため仕様的には許容)。`.app-main margin-bottom:49px`はフッター高の決め打ち |
-| L5 | import流儀の混在 | `@/lib/supabase`と`../../lib/supabase`が混在。インデント(2/4)・クォートも不統一（register/login/reset-passwordが4スペース） |
-| L6 | `PostCard`の状態同期 | `displayContent`が初期値のみ保持。親が再取得しても更新されない（編集はローカル反映なので現状は表面化しにくい） |
-| L7 | 型の弱さ | `as unknown as PostTag[]`(`page.tsx:160`)、`post/[id]`も同様キャスト。Supabase生成型(`supabase gen types`)未使用。`NEXT_PUBLIC_*`に`!`断定でenv未設定時に実行時まで気付かない |
-| L8 | `tsconfig.tsbuildinfo`/`next-env.d.ts`が作業ツリーに存在 | .gitignore済みで追跡はされていない [確認済]。問題なし |
-| L9 | 共感/コメント数が一覧に出ない | 機能面の見劣り（UX） |
+| L1 | CSS 重複 | `.profile-card*` と `.post-form*` がほぼ同一定義（globals.css:705-813 / 819-937、約100行重複）。`.profile-card__input--readonly` に `!important`（:770-773）。`.home-tag-button` を投稿フォームが上書き流用（:884-894）。`.chat-room__button` を `.post-card__actions button` と相乗り（:385-411）。命名が `home-*` と BEM 混在 |
+| L2 | CSS 残存/未使用 | `cloud-card` は現CSSに**存在しない**（TASKSの整理項目は対象なし、確認済）。明確な未使用クラスは今回見つからず（全クラスの使用突合は未実施[推測]）。`tailwindcss` は import しているが実質 `border-t border-gray-200` 等の数個の utility のみ（`layout.tsx:58`）で、preflight が全体に効く |
+| L3 | フォント未指定 | `body{font-family:sans-serif}`（:17）のみ。日本語は OS 依存 |
+| L4 | 型キャスト | `as unknown as` が `app/page.tsx:101`、`post/[id]/page.tsx:89`。生成型(`supabase gen types`)未使用。`lib/supabase.ts` の `!` 断定は env 未設定に実行時まで気付けない。リアルタイム `payload.new as Comment` は未検証 |
+| L5 | 詳細ページの細部 | コメント時刻が時:分のみで日付なし（`:371-374`）。他者の削除（DELETEイベント）を購読していないため他クライアントで消えない（`:117-141`）。`stickToBottom` 等の挙動は実機未確認 |
+| L6 | パフォーマンス | `profiles.find` が O(n²)（`app/page.tsx:219`）、各ページで `getUser`＋Headerで `getSession`（二重の認証確認）。件数が増えるまで影響小 |
+| L7 | アクセシビリティ/メタ | `:focus-visible` スタイルなし、編集textareaに label なし（`PostCard.tsx:89`）、`error.tsx`/`not-found.tsx`/`loading.tsx` なし、OGP/規約ページなし。ヘッダーに自分のメールを常時表示（スクショ共有時に注意） |
+| L8 | `.vscode/launch.json` が `localhost:8080`（Next既定は3000） | 開発のみ、公開に無関係 |
 
 ---
 
 ## 4. セキュリティ評価
-- **確認済・良好**: `.env.local`は`.gitignore`の`.env*`で除外、gitの追跡対象外。クライアントで使うのは`NEXT_PUBLIC_SUPABASE_URL`/`ANON_KEY`のみ。`service_role`キー使用箇所なし（`grep`相当で`lib/supabase.ts`のみ）。dangerouslySetInnerHTML等なし（Reactの自動エスケープでXSS低リスク）。ユーザー所有操作は常に`.eq(user_id)`/RLS前提。ユーザーIDは`auth.getUser()`(サーバー検証)由来。
-- **懸念**: 本人判定がUI側（`post.user_id === userId`）に依存する箇所はあるが、実防御はRLS。**RLS未検証(H2)**。`posts`の`update`は`with check`で`user_id`改ざん防止の記載あり(文書上OK)。`profiles.insert/update`は`upsert`を使用 → insert+update両ポリシー必要（文書上は存在）。`empathies`のUNIQUE(user_id,post_id)はDATABASE.md上あり（実DB未確認）。コメント/投稿に**通報・ブロックなし**で、匿名の悩み系サービスとして公開時のモデレーション欠如はリスク（TASKS優先度C扱い）。メール(`Header`)は本人のみに表示で匿名性は維持。プロフィール公開URLが`user_id`(UUID)で、投稿者名がリンクされる点は仕様どおり。
-- **未確認**: Supabaseのメール確認設定、レート制限、Redirect URL、SMTP、DBのCHECK/trigger、実際のポリシー有効状態、Auth Captcha。
 
-## 5. 品質まとめ
-- ローディング: ホーム/詳細/プロフィールに「読み込み中...」あり。送信系のローディングは`profile`/`reset`系のみ。
-- エラー: 3系統混在（alert / message state / console）。統一なし。
-- パフォーマンス: 全件取得、`profiles.find`のO(n²)（件数少なければ許容）、`getUser`と`getSession`の二重呼び出し。
-- テスト: なし。lint/buildは未実行。
+**確認済・良好**
+- `.env.local` は `.gitignore` の `.env*` で除外、git履歴にも追加履歴なし。キー名は `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` のみ（値は読んでいない）。
+- `service_role` の使用はコード全体で0件。`dangerouslySetInnerHTML`/`innerHTML` も0件（Reactの自動エスケープ、`white-space:pre-wrap` のみ）。
+- 書き込み時の `user_id` は `auth.getUser()`（サーバー検証）由来（`post/page.tsx:83-98`）。`profiles` は upsert で `user_id` を認証ユーザーに固定。
+- DATABASE.md の RLS 設計は妥当（insert/update の `with check (auth.uid() = user_id)`、`post_tags` の所有者検証など）。
 
-## 6. ドキュメント整合性 [確認済]
-- README.md/ARCHITECTURE.md/DESIGN.md: ルートを **`/signup`** と記載、実装は **`/register`**（README:114, ARCHITECTURE:94,690,730, DESIGN:683）。
-- TASKS.md: パスワードリセットが「保留」だが、`reset-password/*`は**実装済み**（動作は[未確認]）。「CSS cloud-card整理」は対象が既に無い。「レスポンシブ対応[x]」と「スマホ表示確認[ ]」が矛盾。`docs/plans`は未記載。
-- ARCHITECTURE/DESIGNは`hooks/`/`types/`構成を示唆している可能性があるが現状は空ディレクトリ（個別grep上は明確な記載なし→[推測]）。
-- DATABASE.mdはSQLの正だが、実DBと一致するかは[未確認]。profiles自動作成のtrigger記載なし。
+**懸念**
+- 本人判定（編集/削除ボタン表示）は UI 側の `post.user_id === userId` のみ。実防御は RLS に完全依存（H1）。
+- `PostCard` の update は `.eq("id")` のみでUI側の所有確認を持たない → RLS が無効だと他人の投稿を編集できる。
+- 入力検証: 投稿作成・コメントは UI で500字制限だがDB側CHECKは未確認（コメントは文書上も無し）。ユーザー名30字/自己紹介200字も `maxLength` のみで DB 制約の記載は username 30字のみ。
+- 通報/ブロック無し、認証レート制限・CAPTCHA は未確認。
+
+**未確認（Supabase側）**: RLS有効化・ポリシー実体、CHECK制約適用有無、profiles/他のtrigger、Realtime publication、メール確認ON/OFF、SMTP、Site URL/Redirect URL、レート制限、DBバックアップ。
 
 ---
 
-## 修正を推奨する理由と方針（設計は変えない前提）
-| 対象 | 理由 | 方針 |
+## 5. 品質まとめ
+- エラー処理: 上記M7。ローディング: ホーム/詳細/プロフィール/投稿に「読み込み中」あり、認証系は無し。
+- 型: 共通型は整理済み、キャストが残る（L4）。不要処理: Header と各ページの二重認証取得（L6）。
+- テスト: 皆無（M11）。lint: 通過。build: 未実行。
+
+---
+
+## 6. ドキュメント整合性 [確認済]
+| 文書 | 不一致 |
+|---|---|
+| README.md:114 / ARCHITECTURE.md:94,690,733 / DESIGN.md:692 | ルートが `/signup`。実装は **`/register`**。README の構成に `reset-password/` と `lib/tags.ts` `types.ts` `userColor.ts` なし（README:119-139） |
+| TASKS.md:31 | パスワードリセットが「保留」だが `reset-password` 2画面は**実装済み**（動作未確認）。優先度B（:162-168）と重複 |
+| TASKS.md:99 | 「`cloud-card` CSS整理」は対象が既に存在しない |
+| TASKS.md:90/102 | 「レスポンシブ対応 [x]」と「スマホ表示確認 [ ]」が矛盾。投稿カードずれ修正（:93,113）は実装済み（直近コミット「投稿カードの位置ずれ修正」）に見えるが未更新 |
+| TASKS.md:70 | 「コメント投稿者名からプロフィールへの遷移 [x]」はチャットUI化で実装なし（M5） |
+| DATABASE.md:205 | comments に長さCHECKなし（chat-room計画は追加を想定）。comments の UPDATE が「要確認」のまま。Realtime 前提が無記載 |
+| ARCHITECTURE.md | `docs/plans` 運用・`lib/` 追加ファイルの反映なし |
+| README/REQUIREMENTS | 「匿名SNS」と、ヘッダーでのメール表示/コメント投稿者非表示の整合を要確認 |
+
+---
+
+## 修正を推奨する理由と修正方針（設計は変更しない前提）
+
+| 項目 | 理由 | 方針 |
 |---|---|---|
-| H1 スクロール | 公開後に詳細・フォームが使えなくなる | 非ホームページで内部スクロールする共通ラッパーclass、または`.app-main`の`overflow-y:auto`化。ホームの現行構造は維持 |
-| H2 RLS | 唯一の防御線 | DATABASE.md §5のSQLと実Supabaseのポリシー一覧を突合。別アカウント2つで編集/削除/改ざんテスト（TASKS既存項目） |
-| H3 DB制約 | クライアント検証迂回対策 | `content`に長さ/空白CHECKを追加（DB変更は別途ご承認のうえ）。クライアントにも`maxLength`と文字数表示 |
-| H4/M7 認証UX | 初回ユーザー離脱 | 登録後に「確認メールを送信」案内、PW長検証、`<form onSubmit>`化、送信中disabled |
-| M1 | 仕様確認 | 未ログイン時の挙動を仕様決定（ログイン誘導表示 or 閲覧公開） |
-| M2/M3 | データ不整合・重複 | 送信中state追加。タグ保存はRPC等を検討（要設計承認） |
-| M4/M5 | 安定性・将来性 | 最新リクエストのみ反映(requestId)、`limit`+追加読み込み |
-| M9/M10/L2/L3 | 一貫性 | 詳細/フォーム画面に既存のガラス調トークンを適用、`<main>`重複除去、CSS整理 |
-| L1/L5/L7 | 保守性 | 未使用削除、型を`types/`へ集約、import統一 |
-| 文書 | 信頼性 | `/signup`→`/register`、TASKS更新 |
-| M11 | 回帰防止 | 最低限の手動テスト表→余裕があればPlaywright |
+| H1 RLS/DB | 唯一の防御線。未検証のまま公開不可 | DATABASE.md §5 の SQL と Supabase の実ポリシーを突合。2アカウントで編集/削除/改ざん/未ログイン取得テスト。CHECK適用確認、コメントCHECK追加、Realtime publication 確認（**DB変更は承認後**） |
+| H2 | 初回ユーザーの離脱 | 登録後に「確認メールを送りました」案内、Site URL/Redirect URL を本番に設定、リセットを実メールで検証 |
+| H3 | 空表示は誤解を招く | 未ログイン時はログイン誘導、取得失敗は別メッセージ |
+| H4 | 運営リスク | 最低限の利用規約・プライバシー・問い合わせ導線。通報機能は設計（DATABASE §10）に沿って別途 |
+| M1/M2 | デザイン断絶 | 既存の `profile-card` 系トークン/クラスを流用して認証画面と公開プロフィールを整備。`<form onSubmit>`・送信中disabled・PW長検証 |
+| M3/M4 | 誤操作・DB拒否 | 削除の確認、編集に `maxLength=500` とエラー文言の固定化 |
+| M6 | 規模増で劣化 | `limit`＋追加読み込み、リクエストID、タグ絞り込みは `post_tags` 結合クエリ化 |
+| M7 | 一貫性 | alert を画面内メッセージに統一 |
+| M10 | 実機で崩れる可能性 | PC/タブレット/スマホ（実ブラウザ）で確認し、ヘッダー・チャット高さ・カード高さを調整 |
+| L1 | 保守性 | `.profile-card` と `.post-form` の共通部を統合（見た目は維持） |
+| 文書 | 信頼性 | `/signup`→`/register`、TASKS・README・DATABASE を現状に更新 |
+| M11 | 回帰防止 | まず手動テスト表、余裕があれば Playwright |
 
 ---
 
 ## 7. 公開までに必要な作業一覧（優先順）
-1. H1 非ホーム画面のスクロール/レイアウト修正（実機でPC/スマホ確認）
-2. 左列カードずれの修正を完了しコミット（未コミットの`globals.css`、docs/plan）
-3. RLS全テーブル検証＋2アカウントでの権限テスト（H2）
-4. DB側制約/trigger有無の確認と、必要なら追加（承認後）（H3, M12）
-5. Supabase Auth設定: メール確認ON/OFF、Site URL・Redirect URL、SMTP、リセットメール動作確認（H4）
-6. 認証画面のバリデーション・案内整備（M7）
-7. 詳細/投稿/プロフィール画面のデザイン統一（M9, M10）
-8. エラー/空/未ログイン表示の統一（M1, M6）
-9. `npm run lint` / `npm run build` の通過確認（未実行）
-10. 手動動作テスト（TASKS 動作テスト項目一式）
-11. ドキュメント整合（signup→register 等）、TASKS更新
-12. Vercel環境変数設定・デプロイ・公開URLで再確認
-13. 利用規約/プライバシー/通報導線の最低限の検討（悩み相談系のため）
+1. Supabase 実体の検証（RLS全テーブル、CHECK、Realtime、メール確認設定）＋ 2アカウント権限テスト
+2. コメントのDB側CHECK追加・`posts_content_check` 適用確認（承認後）
+3. 認証画面（login/register/reset）の整備とメール確認案内
+4. 公開プロフィール画面のスタイル整備
+5. 未ログイン/取得失敗/空の表示分離、エラー表示の統一
+6. 投稿削除の確認・編集の文字数制限
+7. 実機（PC・タブレット・スマホ）でのレイアウト確認（特にヘッダー・チャット画面）
+8. `npm run build` の通過確認
+9. 手動動作テスト一式（TASKS優先度A）
+10. 最低限の利用規約・プライバシー・問い合わせ、通報導線の検討
+11. ドキュメント整合（上記6の表）
+12. Vercel 環境変数・Supabase Redirect URL 設定、デプロイ、本番URLで再確認
 
-## 7'. 現時点で公開を妨げる重大な問題
-1. **H1**: ホーム以外のページがスクロール不能（[確認済(CSS)]、実機は[未確認]）
-2. **H2**: RLS実設定が未検証（[未確認]。結果次第で最重大）
-3. **H4**: 認証メール確認/Redirect URL未設定の可能性（[未確認]）
-4. **H3**: DB側の入力制約不足（投稿・コメントの長さ上限なし）
-5. 悩み系SNSとして通報・ブロック・利用規約が無い点は公開判断として要検討（法的/運用リスク。[推測]）
+## 公開を妨げる重大な問題
+1. **RLS/DB制約/Realtime設定が未検証**（H1・[未確認]。結果次第で最重大）
+2. **メール確認・Redirect URL が未整備**（H2・[未確認]）
+3. **未ログイン閲覧時の表示が誤解を招く**（H3）
+4. **認証画面が未整備で、初回体験が崩れる**（M1）
+5. **通報・規約が無い悩み系SNSの運営リスク**（H4・[推測]）
 
 ---
-本調査ではコード・ファイル・DBの変更は一切行っていない（このレポート用の計画ファイルのみ作成）。
+
+## 検証方法（本調査の再現）
+- `npx eslint`（実行済み、問題なし）。`next build`・実機・Supabase 管理画面での確認は未実施。
+- 本調査ではコード・DBを変更していない。変更したのはこのレポート（`docs/examination/audit-report.md`）のみ。
