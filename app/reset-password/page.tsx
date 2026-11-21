@@ -7,10 +7,15 @@ import { supabase } from "@/lib/supabase";
 export default function ResetPasswordRequest() {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [isError, setIsError] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleReset = async () => {
+  const handleReset = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (loading) return;
+
     if (!email.trim()) {
+      setIsError(true);
       setMessage("メールアドレスを入力してください");
       return;
     }
@@ -25,38 +30,62 @@ export default function ResetPasswordRequest() {
     setLoading(false);
 
     if (error) {
+      setIsError(true);
       setMessage("メールの送信に失敗しました。設定を確認してください。");
       console.error(error);
       return;
     }
 
+    setIsError(false);
     setMessage(
       "パスワードリセットのメールを送信しました。メールを確認してください。"
     );
   };
 
   return (
-    <div>
-      <h1>パスワードリセット</h1>
+    <div className="login-card">
+      <h1 className="login-card__title">パスワードリセット</h1>
 
-      <p>登録したメールアドレスを入力してください。</p>
+      <p className="login-card__text">登録したメールアドレスを入力してください。</p>
 
-      <input
-        type="email"
-        placeholder="メールアドレス"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+      <form onSubmit={handleReset} noValidate>
+        <div className="login-card__field">
+          <label htmlFor="reset-email">メールアドレス</label>
+          <input
+            id="reset-email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
 
-      <button onClick={handleReset} disabled={loading}>
-        {loading ? "送信中..." : "パスワードリセット"}
-      </button>
+        {message && (
+          <p
+            className={`login-card__message${
+              isError ? "" : " login-card__message--info"
+            }`}
+          >
+            {message}
+          </p>
+        )}
 
-      {message && <p>{message}</p>}
+        <div className="login-card__footer">
+          <button
+            type="submit"
+            className="login-card__submit"
+            disabled={loading}
+          >
+            {loading ? "送信中..." : "リセットメールを送信"}
+          </button>
+        </div>
+      </form>
 
-      <p>
-        <Link href="/login">ログイン画面に戻る</Link>
-      </p>
+      <div className="login-card__links">
+        <Link href="/login" className="login-card__link">
+          ログイン画面に戻る
+        </Link>
+      </div>
     </div>
   );
 }

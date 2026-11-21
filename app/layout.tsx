@@ -15,40 +15,6 @@ export default function RootLayout({
   return (
     <html lang="ja" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        {/* 雲の質感を作るSVGフィルター */}
-        <svg
-          aria-hidden="true"
-          width="0"
-          height="0"
-          style={{ position: "absolute" }}
-        >
-          <defs>
-            <filter
-              id="cloud-noise"
-              x="-25%"
-              y="-25%"
-              width="150%"
-              height="150%"
-            >
-              <feTurbulence
-                type="fractalNoise"
-                baseFrequency="0.035"
-                numOctaves="3"
-                seed="8"
-                result="noise"
-              />
-
-              <feDisplacementMap
-                in="SourceGraphic"
-                in2="noise"
-                scale="20"
-                xChannelSelector="R"
-                yChannelSelector="G"
-              />
-            </filter>
-          </defs>
-        </svg>
-
         <Header />
 
         <main className="app-main flex-1 w-full min-h-0">

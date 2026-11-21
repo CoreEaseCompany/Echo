@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -53,10 +54,14 @@ export default function Header() {
 
       {/* Echoタイトル */}
       <Link href="/" className="header-brand">
-        <span className="header-brand-title">Echo</span>
-        <span className="header-brand-subtitle">
-          あなたの気持ちを、ここに。
-        </span>
+        <Image
+          src="/images/Logo.png"
+          alt="Echo"
+          width={80}
+          height={80}
+          loading="eager"
+          className="header-logo"
+        />
       </Link>
 
       {/* ナビゲーション */}

@@ -8,17 +8,26 @@ import { supabase } from "@/lib/supabase";
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
 
   // ログイン処理
-  const handleLogin = async () => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (submitting) return;
+
+    setSubmitting(true);
+    setMessage("");
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
-      alert("メールアドレスまたはパスワードが正しくありません");
+      setMessage("メールアドレスまたはパスワードが正しくありません");
+      setSubmitting(false);
       return;
     }
 
@@ -27,32 +36,55 @@ export default function LoginPage() {
   };
 
   return (
-    <div>
-      <h1>ログイン</h1>
+    <div className="login-card">
+      <h1 className="login-card__title">ログイン</h1>
 
-      <input
-        type="email"
-        placeholder="メールアドレス"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+      <form onSubmit={handleLogin}>
+        <div className="login-card__field">
+          <label htmlFor="login-email">メールアドレス</label>
+          <input
+            id="login-email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
 
-      <br />
+        <div className="login-card__field">
+          <label htmlFor="login-password">パスワード</label>
+          <input
+            id="login-password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
 
-      <input
-        type="password"
-        placeholder="パスワード"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
+        {message && <p className="login-card__message">{message}</p>}
 
-      <br />
+        <div className="login-card__footer">
+          <button
+            type="submit"
+            className="login-card__submit"
+            disabled={submitting}
+          >
+            {submitting ? "ログイン中..." : "ログイン"}
+          </button>
+        </div>
+      </form>
 
-      <button onClick={handleLogin}>ログイン</button>
-
-      <p>
-        <Link href="/reset-password">パスワードを忘れた方はこちら</Link>
-      </p>
+      <div className="login-card__links">
+        <Link href="/reset-password" className="login-card__link">
+          パスワードを忘れた方はこちら
+        </Link>
+        <Link href="/register" className="login-card__link">
+          新規登録はこちら
+        </Link>
+      </div>
     </div>
   );
 }

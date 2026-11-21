@@ -8,21 +8,30 @@ export default function UpdatePasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [isError, setIsError] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleUpdatePassword = async () => {
+  const showError = (text: string) => {
+    setIsError(true);
+    setMessage(text);
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (loading) return;
+
     if (!password || !confirmPassword) {
-      setMessage("パスワードを入力してください");
+      showError("パスワードを入力してください");
       return;
     }
 
     if (password.length < 6) {
-      setMessage("パスワードは6文字以上にしてください");
+      showError("パスワードは6文字以上にしてください");
       return;
     }
 
     if (password !== confirmPassword) {
-      setMessage("パスワードが一致しません");
+      showError("パスワードが一致しません");
       return;
     }
 
@@ -36,60 +45,74 @@ export default function UpdatePasswordPage() {
     setLoading(false);
 
     if (error) {
-      setMessage(
+      showError(
         "パスワードの変更に失敗しました。再設定メールから開き直してください。"
       );
       console.error(error);
       return;
     }
 
+    setIsError(false);
     setMessage("パスワードを変更しました。ログインできます。");
     setPassword("");
     setConfirmPassword("");
   };
 
   return (
-    <div>
-      <h1>新しいパスワードの設定</h1>
+    <div className="login-card">
+      <h1 className="login-card__title">新しいパスワードの設定</h1>
 
-      <p>新しいパスワードを入力してください。</p>
+      <p className="login-card__text">新しいパスワードを入力してください。</p>
 
-      <div>
-        <label htmlFor="password">新しいパスワード</label>
-        <input
-          id="password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="new-password"
-        />
+      <form onSubmit={handleUpdatePassword}>
+        <div className="login-card__field">
+          <label htmlFor="password">新しいパスワード</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+          />
+        </div>
+
+        <div className="login-card__field">
+          <label htmlFor="confirmPassword">新しいパスワード（確認）</label>
+          <input
+            id="confirmPassword"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+          />
+        </div>
+
+        {message && (
+          <p
+            className={`login-card__message${
+              isError ? "" : " login-card__message--info"
+            }`}
+          >
+            {message}
+          </p>
+        )}
+
+        <div className="login-card__footer">
+          <button
+            type="submit"
+            className="login-card__submit"
+            disabled={loading}
+          >
+            {loading ? "変更中..." : "パスワードを変更"}
+          </button>
+        </div>
+      </form>
+
+      <div className="login-card__links">
+        <Link href="/login" className="login-card__link">
+          ログイン画面へ戻る
+        </Link>
       </div>
-
-      <div>
-        <label htmlFor="confirmPassword">
-          新しいパスワード（確認）
-        </label>
-        <input
-          id="confirmPassword"
-          type="password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          autoComplete="new-password"
-        />
-      </div>
-
-      <button
-        onClick={handleUpdatePassword}
-        disabled={loading}
-      >
-        {loading ? "変更中..." : "パスワードを変更"}
-      </button>
-
-      {message && <p>{message}</p>}
-
-      <p>
-        <Link href="/login">ログイン画面へ戻る</Link>
-      </p>
     </div>
   );
 }

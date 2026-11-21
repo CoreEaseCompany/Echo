@@ -2,106 +2,119 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import type { Post, Profile } from "@/lib/types";
-
-type PostSummary = Pick<Post, "id" | "content" | "created_at">;
+import { getUserColor } from "@/lib/userColor";
+import type { Profile } from "@/lib/types";
 
 export default function PublicProfilePage() {
   const params = useParams();
+  const router = useRouter();
   const userId = params.userId as string;
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [posts, setPosts] = useState<PostSummary[]>([]);
+  const [loggedIn, setLoggedIn] = useState(true);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data: profileData, error: profileError } =
-        await supabase
-          .from("profiles")
-          .select("*")
-          .eq("user_id", userId)
-          .maybeSingle();
+      const { data: authData } = await supabase.auth.getUser();
 
-      if (profileError) {
-        console.error(profileError);
+      if (!authData.user) {
+        setLoggedIn(false);
+        setLoading(false);
+        return;
+      }
+
+      // 自分自身のプロフィールは編集可能な /profile に集約する
+      if (authData.user.id === userId) {
+        router.replace("/profile");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (error) {
+        console.error(error);
         setMessage("プロフィールの取得に失敗しました");
-        setLoading(false);
-        return;
-      }
-
-      if (!profileData) {
+      } else if (!data) {
         setMessage("プロフィールが見つかりません");
-        setLoading(false);
-        return;
-      }
-
-      setProfile(profileData);
-
-      const { data: postData, error: postError } =
-        await supabase
-          .from("posts")
-          .select("id, content, created_at")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-
-      if (postError) {
-        console.error(postError);
-        setMessage("投稿の取得に失敗しました");
       } else {
-        setPosts(postData ?? []);
+        setProfile(data);
       }
 
       setLoading(false);
     };
 
     fetchData();
-  }, [userId]);
+  }, [userId, router]);
 
   if (loading) {
-    return <div>読み込み中...</div>;
+    return (
+      <section className="profile-card profile-card--state">
+        <p>読み込み中...</p>
+      </section>
+    );
+  }
+
+  if (!loggedIn) {
+    return (
+      <section className="profile-card profile-card--state">
+        <p>ログインしてください</p>
+        <Link href="/login" className="profile-card__link">
+          ログインページへ
+        </Link>
+      </section>
+    );
   }
 
   if (!profile) {
     return (
-      <div>
+      <section className="profile-card profile-card--state">
         <p>{message || "プロフィールが見つかりません"}</p>
-        <Link href="/">投稿一覧へ戻る</Link>
-      </div>
+        <Link href="/" className="profile-card__link">
+          ホームへ戻る
+        </Link>
+      </section>
     );
   }
 
   return (
-    <div>
-      <h1>{profile.username || "名前未設定"}</h1>
+    <section className="profile-card">
+      <h1 className="profile-card__title">プロフィール</h1>
 
-      <h2>自己紹介</h2>
-      <p>{profile.bio || "自己紹介はありません"}</p>
+      <div
+        className="profile-card__icon"
+        style={{ backgroundColor: getUserColor(profile.user_id) }}
+        aria-hidden="true"
+      />
 
-      <hr />
+      <div className="profile-card__field">
+        <label htmlFor="username">ユーザーネーム</label>
+        <input
+          id="username"
+          type="text"
+          value={profile.username || "名前未設定"}
+          readOnly
+          className="profile-card__input--readonly"
+        />
+      </div>
 
-      <h2>投稿一覧</h2>
-
-      {posts.length === 0 ? (
-        <p>まだ投稿はありません</p>
-      ) : (
-        posts.map((post) => (
-          <div key={post.id}>
-            <Link href={`/post/${post.id}`}>
-              <p>{post.content}</p>
-            </Link>
-            <small>
-              {new Date(post.created_at).toLocaleString("ja-JP")}
-            </small>
-            <hr />
-          </div>
-        ))
-      )}
-
-      <Link href="/">投稿一覧へ戻る</Link>
-    </div>
+      <div className="profile-card__field">
+        <label htmlFor="bio">自己紹介</label>
+        <textarea
+          id="bio"
+          value={profile.bio ?? ""}
+          readOnly
+          rows={5}
+          className="profile-card__input--readonly"
+        />
+      </div>
+    </section>
   );
 }

@@ -76,42 +76,16 @@ body::before {
 
 /* Echoタイトル */
 .header-brand {
-  position: relative;
-  isolation: isolate;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 280px;
-  min-height: 90px;
-  color: #263142;
   text-decoration: none;
 }
 
-.header-brand::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(ellipse at 20% 50%, #fff 0 22%, transparent 23%),
-    radial-gradient(ellipse at 35% 25%, #fff 0 25%, transparent 26%),
-    radial-gradient(ellipse at 65% 25%, #fff 0 25%, transparent 26%),
-    radial-gradient(ellipse at 80% 50%, #fff 0 22%, transparent 23%),
-    radial-gradient(ellipse at 50% 65%, #fff 0 42%, transparent 43%);
-  filter: url(#cloud-noise)
-          drop-shadow(0 5px 15px rgba(255, 255, 255, 0.3));
-}
-
-.header-brand-title {
-  font-size: 30px;
-  font-weight: bold;
-}
-
-.header-brand-subtitle {
-  margin-top: 2px;
-  font-size: 11px;
-  color: #64748b;
+.header-logo {
+  width: 80px;
+  height: 80px;
+  border-radius: 18px;
 }
 
 /* ナビゲーション */
@@ -688,12 +662,9 @@ body::before {
     font-size: 11px;
   }
 
-  .header-brand {
-    min-height: 80px;
-  }
-
-  .header-brand-title {
-    font-size: 26px;
+  .header-logo {
+    width: 64px;
+    height: 64px;
   }
 }
 
@@ -780,6 +751,11 @@ body::before {
   cursor: not-allowed;
 }
 
+.profile-card__field .profile-card__input--readonly:focus {
+  border-color: #9ca3af;
+  box-shadow: none;
+}
+
 .profile-card__footer {
   display: flex;
   justify-content: flex-end;
@@ -814,6 +790,118 @@ body::before {
 
 @media (max-width: 600px) {
   .profile-card {
+    margin: 24px auto;
+    padding: 20px 16px;
+  }
+}
+
+/* =========================
+   ログイン画面
+========================= */
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  margin: 40px auto;
+  padding: 28px 32px 24px;
+  border-radius: 16px;
+  background: rgba(217, 217, 217, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #1e293b;
+  box-sizing: border-box;
+}
+
+.login-card__title {
+  margin: 0 0 16px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.login-card__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.login-card__field label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-card__field input {
+  width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+  background: #fff;
+  color: #1e293b;
+  font: inherit;
+}
+
+.login-card__field input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
+
+.login-card__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.login-card__submit {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.login-card__submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.login-card__message {
+  margin: 0 0 8px;
+  text-align: center;
+  font-size: 14px;
+  color: #b91c1c;
+}
+
+.login-card__message--info {
+  color: #1e293b;
+}
+
+.login-card__text {
+  margin: 0 0 16px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.login-card__links {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 20px;
+  font-size: 14px;
+}
+
+.login-card__link {
+  color: #1e293b;
+  text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+  .login-card {
     margin: 24px auto;
     padding: 20px 16px;
   }
