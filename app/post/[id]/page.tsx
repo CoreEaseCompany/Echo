@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
 import { useParams } from "next/navigation";
 import ChatMedia from "@/components/ChatMedia";
+import UserAvatar from "@/components/UserAvatar";
+import { getAvatarUrl } from "@/lib/avatar";
 import {
   CHAT_MEDIA_ACCEPT,
   createChatMediaUrls,
@@ -17,7 +19,6 @@ import { supabase } from "@/lib/supabase";
 import { normalizeTags } from "@/lib/tags";
 import type { JoinedTags } from "@/lib/tags";
 import type { Comment, Empathy, Post, Tag } from "@/lib/types";
-import { getUserColor } from "@/lib/userColor";
 
 const MAX_LENGTH = 500;
 
@@ -51,6 +52,8 @@ export default function PostDetail() {
   const [processing, setProcessing] = useState(false);
   // media_path → 署名付きURL
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
+  // user_id → アイコン画像のパス（NULL は色アイコン）
+  const [avatarPaths, setAvatarPaths] = useState<Record<string, string | null>>({});
 
   const messagesRef = useRef<HTMLDivElement>(null);
   // 最下部付近を表示しているときだけ、新着で自動スクロールする
@@ -59,11 +62,47 @@ export default function PostDetail() {
   const previewUrlRef = useRef<string | null>(null);
   // 署名付きURLの再発行は1パスにつき1回まで（期限切れ対策・無限ループ防止）
   const retriedPathsRef = useRef(new Set<string>());
+  // アイコン画像を取得済み・取得中の user_id（重複取得の防止）
+  const requestedAvatarIdsRef = useRef(new Set<string>());
 
   // 署名付きURLを発行して追加する
   const loadMediaUrls = useCallback(async (paths: string[]) => {
     const urls = await createChatMediaUrls(paths);
     setMediaUrls((current) => ({ ...current, ...urls }));
+  }, []);
+
+  // まだ取得していないユーザーのアイコン画像のパスをまとめて取得する
+  const loadAvatars = useCallback(async (userIds: string[]) => {
+    const requested = requestedAvatarIdsRef.current;
+    const ids = [...new Set(userIds)].filter((userId) => !requested.has(userId));
+
+    if (ids.length === 0) return;
+
+    ids.forEach((userId) => requested.add(userId));
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("user_id, avatar_path")
+      .in("user_id", ids);
+
+    if (error) {
+      // 取得できなくても色アイコンで表示する
+      console.error(error);
+      return;
+    }
+
+    const paths: Record<string, string | null> = {};
+
+    // プロフィールがないユーザーは NULL（色アイコン）として記録する
+    for (const userId of ids) {
+      paths[userId] = null;
+    }
+
+    for (const profile of data ?? []) {
+      paths[profile.user_id] = profile.avatar_path;
+    }
+
+    setAvatarPaths((current) => ({ ...current, ...paths }));
   }, []);
 
   const scrollToBottomIfSticky = useCallback(() => {
@@ -139,6 +178,9 @@ export default function PostDetail() {
         const loadedComments: Comment[] = commentData ?? [];
         setComments(loadedComments);
 
+        // アイコン画像は完了を待たずに取得する
+        loadAvatars(loadedComments.map((comment) => comment.user_id));
+
         // 添付メディアのURLはまとめて発行する（完了を待たずに表示を始める）
         loadMediaUrls(
           loadedComments.flatMap((comment) =>
@@ -151,7 +193,7 @@ export default function PostDetail() {
     };
 
     getData();
-  }, [id, loadMediaUrls]);
+  }, [id, loadMediaUrls, loadAvatars]);
 
   // 他ユーザーの新着メッセージを購読する
   const postId = post?.id;
@@ -173,6 +215,7 @@ export default function PostDetail() {
           const added = payload.new as Comment;
 
           setComments((current) => appendComment(current, added));
+          loadAvatars([added.user_id]);
 
           if (added.media_path) {
             loadMediaUrls([added.media_path]);
@@ -184,7 +227,7 @@ export default function PostDetail() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [postId, loadMediaUrls]);
+  }, [postId, loadMediaUrls, loadAvatars]);
 
   // 新着時の自動スクロール
   useEffect(() => {
@@ -360,6 +403,7 @@ export default function PostDetail() {
       // 自分の送信分は返り値で追加する
       const added = data as Comment;
       setComments((current) => appendComment(current, added));
+      loadAvatars([added.user_id]);
 
       if (added.media_path) {
         loadMediaUrls([added.media_path]);
@@ -490,12 +534,12 @@ export default function PostDetail() {
               key={comment.id}
               className={`chat-message${isMine ? " chat-message--mine" : ""}`}
             >
-              <Link
-                href={`/profile/${comment.user_id}`}
-                prefetch={false}
+              <UserAvatar
+                userId={comment.user_id}
+                avatarUrl={getAvatarUrl(avatarPaths[comment.user_id])}
                 className="chat-message__avatar"
-                style={{ backgroundColor: getUserColor(comment.user_id) }}
-                aria-label="プロフィールを見る"
+                href={`/profile/${comment.user_id}`}
+                ariaLabel="プロフィールを見る"
               />
 
               <div className="chat-message__body">

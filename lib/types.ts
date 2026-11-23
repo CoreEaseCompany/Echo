@@ -16,6 +16,8 @@ export type Profile = {
   user_id: string;
   username: string | null;
   bio: string | null;
+  // Storage バケット avatars 上のパス（NULL は色アイコン）
+  avatar_path: string | null;
 };
 
 export type ChatMediaType = "image" | "video";

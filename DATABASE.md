@@ -33,6 +33,11 @@ Supabaseが提供するPostgreSQLデータベースを利用する。
 - Storageバケット`chat-media`の作成と`storage.objects`のポリシー追加
 - 適用後の実DBの状態（制約・ポリシー名など）は再調査していない。
 
+プロフィールアイコン画像機能（`docs/plans/features/profile-icon-image.md`）のSQLも実DBに適用済み。以下は実行したSQLの内容を反映したもので、適用後の実DBは再調査していない。
+
+- `profiles`への列（`avatar_path`）とCHECK制約`profiles_avatar_path_owner_check`の追加
+- Storageバケット`avatars`の作成と`storage.objects`のポリシー追加
+
 ### 1.3 基本方針
 
 - ユーザー情報はSupabase Authで管理する。
@@ -60,7 +65,7 @@ Supabaseが提供するPostgreSQLデータベースを利用する。
 
 認証情報はSupabase Authの`auth.users`で管理する。
 
-テーブルとは別に、チャットの画像・動画はSupabase Storageのバケット`chat-media`で管理する（「3.8 Storage（chat-media）」参照）。
+テーブルとは別に、チャットの画像・動画はSupabase Storageのバケット`chat-media`で管理する（「3.8 Storage（chat-media）」参照）。プロフィールのアイコン画像はバケット`avatars`で管理する（「3.9 Storage（avatars）」参照）。
 
 ---
 
@@ -160,8 +165,11 @@ create table profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   username text unique,
   bio text,
+  avatar_path text,
   created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  updated_at timestamptz default now(),
+  constraint profiles_avatar_path_owner_check
+    check (avatar_path is null or avatar_path like user_id::text || '/%')
 );
 ```
 
@@ -172,6 +180,7 @@ create table profiles (
 | user_id | uuid | PK / FK | ユーザーID |
 | username | text | UNIQUE | ユーザー名 |
 | bio | text | - | 自己紹介 |
+| avatar_path | text | NULL可 / 所有者チェック | Storage`avatars`上のアイコン画像のパス（`{user_id}/{uuid}.jpg`）。NULLならユーザーIDから決まる色アイコンを表示 |
 | created_at | timestamptz | DEFAULT now() | 作成日時 |
 | updated_at | timestamptz | DEFAULT now() | 更新日時 |
 
@@ -198,6 +207,8 @@ create table profiles (
 - usernameは必須入力。
 - プロフィール更新にはupsertを使用している。
 - usernameが重複した場合、PostgreSQLの一意制約違反（23505）を処理する。
+- `avatar_path`は自分の`user_id`フォルダのパスのみ設定できる（`profiles_avatar_path_owner_check`）。
+- アイコン画像を変更していない場合、upsertに`avatar_path`を含めない（既存値を上書きしないため）。
 
 ### 注意事項
 
@@ -528,6 +539,59 @@ chat-media/{user_id}/{post_id}/{uuid}.{拡張子}
 
 ---
 
+## 3.9 Storage（avatars）
+
+プロフィールのアイコン画像を保存するSupabase Storageの公開バケット。
+
+### バケット定義
+
+```sql
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'avatars',
+  'avatars',
+  true,
+  1048576, -- 1MB（256pxのJPEGは数十KB。余裕を持たせた上限）
+  array['image/jpeg']
+);
+```
+
+| 項目 | 値 | 説明 |
+|---|---|---|
+| id / name | avatars | バケット名 |
+| public | true | 公開。表示には公開URL（`getPublicUrl`）を使う。URLを知っていれば未ログインでも閲覧できる |
+| file_size_limit | 1048576（1MB） | 1ファイルの上限 |
+| allowed_mime_types | JPEG | アプリ側で256×256pxのJPEGに変換してからアップロードする |
+
+### ファイルパス
+
+```text
+avatars/{user_id}/{uuid}.jpg
+```
+
+- 1階層目を`user_id`にし、RLSで本人のフォルダにのみ書き込めるようにする。
+- この`{user_id}/{uuid}.jpg`が`profiles.avatar_path`に保存される（バケット名は含まない）。
+- 公開URLのキャッシュで古い画像が表示されないよう、保存のたびに`crypto.randomUUID()`で新しいファイル名にする（上書きしない）。
+
+### データ操作
+
+| 操作 | 権限 |
+|---|---|
+| SELECT | 自分の`user_id`フォルダのみ（`remove()`に必要。公開URLでの表示はRLSを通らない） |
+| INSERT | 自分の`user_id`フォルダにのみ |
+| UPDATE | 不可（UPDATEポリシーなし） |
+| DELETE | 自分の`user_id`フォルダのファイルのみ |
+
+### 注意事項
+
+- 画像は公開URLで配信されるため、未ログインでも閲覧できる。プロフィール画面に、個人を特定できる画像を設定しないよう注意文を表示している。
+- アップロード前にブラウザ側のCanvasで中央を正方形に切り抜き、256×256pxのJPEG（品質0.9、透過部分は白）に変換する。この再エンコードによりEXIFなどのメタデータは除去される。
+- 画像の差し替え・削除時は、プロフィール更新の成功後にアプリ側で古いファイルを削除する。
+- アカウント削除でprofilesが消えても、Storageのファイルは残る（既知の制約）。
+- SELECTポリシーを本人フォルダに限定しているのは、他人のフォルダのファイル一覧（`list`）を取得できないようにするため。Storageの`remove()`にSELECT権限が必要かどうかは公式ドキュメントで未確認のため、本人フォルダのSELECTを許可している。
+
+---
+
 # 4. テーブル間のリレーション
 
 ## 4.1 ER図
@@ -554,6 +618,7 @@ erDiagram
         uuid user_id PK,FK
         text username UK
         text bio
+        text avatar_path
         timestamptz created_at
         timestamptz updated_at
     }
@@ -611,6 +676,8 @@ erDiagram
 postsとtagsはpost_tagsを介した多対多の関係。
 
 `comments.media_path`はStorageバケット`chat-media`内のファイルパスを指す。外部キーではなく文字列で参照するため、DB側ではファイルの存在や削除は連動しない（「3.8 Storage（chat-media）」参照）。
+
+`profiles.avatar_path`も同様に、Storageバケット`avatars`内のファイルパスを文字列で参照する（「3.9 Storage（avatars）」参照）。
 
 ---
 
@@ -737,6 +804,17 @@ Storageの`storage.objects`はSupabaseがRLSを有効にして管理している
 | DELETE | bucket_id = 'chat-media' かつ パスの1階層目が auth.uid() と一致 |
 
 ※コメントの`media_path`と実ファイルの対応（`{user_id}/{post_id}/`）は`comments_media_path_owner_check`で保証する。Storage側のポリシーは1階層目（`user_id`）のみ確認する。
+
+### storage.objects（avatars）
+
+`bucket_id = 'avatars'`のオブジェクトに対するポリシー（対象ロールは`authenticated`）。公開バケットのため、公開URLでの閲覧はRLSを通らない。
+
+| 操作 | 条件 |
+|---|---|
+| SELECT | bucket_id = 'avatars' かつ パスの1階層目が auth.uid() と一致 |
+| INSERT | bucket_id = 'avatars' かつ パスの1階層目が auth.uid() と一致 |
+| UPDATE | なし（ポリシーなし＝不可） |
+| DELETE | bucket_id = 'avatars' かつ パスの1階層目が auth.uid() と一致 |
 
 ## 5.5 RLSポリシーの実装例
 
@@ -920,6 +998,40 @@ using (
 -- UPDATEポリシーは作成しない（上書き・差し替え不可）
 ```
 
+### storage.objects（avatars）
+
+```sql
+-- 自分のフォルダのみ参照できる（remove() は SELECT 権限も必要なため）
+-- 公開URLでの表示には不要。全員に許可すると一覧取得（list）でファイルを列挙できるため本人に限定する
+create policy "Users can view own avatars"
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'avatars'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- 自分のフォルダにのみアップロードできる
+create policy "Users can upload own avatars"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'avatars'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- 自分のファイルのみ削除できる
+create policy "Users can delete own avatars"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'avatars'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- UPDATEポリシーは作成しない（毎回新しいファイル名で保存するため上書き不要）
+```
+
 ---
 
 # 6. データ操作のルール
@@ -1005,6 +1117,17 @@ DB側でもRLSによって本人以外の更新を防止する。
 
 usernameの一意制約に違反した場合はエラーを表示する。
 
+### アイコン画像の変更・削除
+
+アイコン画像の変更・削除は、プロフィールの「保存する」でusername・bioと一緒に確定する。
+
+1. 画像を選択し、形式（JPEG / PNG / WebP）とサイズ（10MBまで）を検証する。
+2. Canvasで中央を正方形に切り抜き、256×256pxのJPEG（透過部分は白）に変換する（メタデータも除去される）。
+3. 保存時、新しい画像があれば`avatars/{user_id}/{uuid}.jpg`にアップロードする。
+4. profilesをupsertする（新しい画像はそのパス、削除は`null`。変更がなければ`avatar_path`を含めない）。
+5. upsertに失敗した場合は、アップロードした画像を削除する（孤立ファイル防止）。
+6. upsertに成功し画像を差し替え・削除した場合は、古い画像をStorageから削除する（失敗はログのみ）。
+
 ## 6.7 タグ検索
 
 1. 選択されたタグIDを取得する。
@@ -1056,6 +1179,7 @@ usernameの一意制約に違反した場合はエラーを表示する。
 | comments | comments_media_type_check | `media_type`は`image` / `video`のみ |
 | comments | comments_media_pair_check | `media_path`と`media_type`は両方NULLか両方NOT NULL |
 | comments | comments_media_path_owner_check | `media_path`は`{user_id}/{post_id}/`で始まる |
+| profiles | profiles_avatar_path_owner_check | `avatar_path`はNULLか`{user_id}/`で始まる |
 
 ## 7.4 NOT NULL制約
 
@@ -1153,6 +1277,10 @@ NEXT_PUBLIC_が付く環境変数に秘密鍵を設定しない。
 - `media_path`がないのに`content`が空文字のコメントをINSERTできない。
 - 許可外のMIMEタイプ、または50MBを超えるファイルを直接アップロードしても拒否される。
 - 未認証ユーザーが署名付きURLの発行・チャットメディアのアップロードをできない。
+- 他人の`user_id`フォルダにアイコン画像をアップロード・削除できない。
+- 他人のフォルダのパスを`avatar_path`に設定できない。
+- JPEG以外、または1MBを超えるファイルを`avatars`に直接アップロードしても拒否される。
+- 他人の`avatars`フォルダを一覧取得できない。
 
 ## 9.5 実DB調査で判明した注意点
 
@@ -1168,6 +1296,14 @@ NEXT_PUBLIC_が付く環境変数に秘密鍵を設定しない。
 - JPEG / PNG / WebPは、アップロード前にブラウザ側で再エンコードしてEXIF（位置情報・撮影日時・カメラ情報など）を除去する。サーバー側ではメタデータの除去を保証していない。GIF・動画のメタデータは除去されない。
 - Storageにはクライアント側の検証とは別に、バケットの`allowed_mime_types`と`file_size_limit`（50MB）の制限がある。画像の10MB上限はアプリ側の検証のみ（DB・Storage側の制限はない）。
 - コメントの削除、投稿やアカウントの削除に伴うStorageファイルの扱いは「3.4 comments」「3.8 Storage（chat-media）」を参照（孤立ファイルは未対応）。
+- 適用後の実DBの制約名・ポリシー名・バケット設定は、実DB調査では再確認していない。
+
+## 9.7 アイコン画像（avatars）に関する注意点
+
+- バケット`avatars`は公開。URLを知っていれば未ログインでも画像を閲覧できる（ファイル名はランダムなUUID）。
+- アップロード前にブラウザ側で256×256pxのJPEGに再エンコードする。サーバー側ではメタデータの除去を保証していない。
+- 旧画像の削除に失敗した場合や、アカウント削除時の画像はStorageに残る（孤立ファイル。現時点では未対応）。
+- Storageの`remove()`に必要な権限（SELECTポリシーの要否）は公式ドキュメントで未確認。
 - 適用後の実DBの制約名・ポリシー名・バケット設定は、実DB調査では再確認していない。
 
 ---

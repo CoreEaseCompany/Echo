@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getUserColor } from "@/lib/userColor";
+import { getAvatarUrl } from "@/lib/avatar";
+import UserAvatar from "@/components/UserAvatar";
 import ProfilePostList from "@/components/ProfilePostList";
 import type { Profile } from "@/lib/types";
 
@@ -93,10 +94,10 @@ export default function PublicProfilePage() {
     <section className="profile-card">
       <h1 className="profile-card__title">プロフィール</h1>
 
-      <div
+      <UserAvatar
+        userId={profile.user_id}
+        avatarUrl={getAvatarUrl(profile.avatar_path)}
         className="profile-card__icon"
-        style={{ backgroundColor: getUserColor(profile.user_id) }}
-        aria-hidden="true"
       />
 
       <div className="profile-card__field">
