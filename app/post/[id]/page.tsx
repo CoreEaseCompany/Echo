@@ -1,9 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { useParams } from "next/navigation";
+import ChatMedia from "@/components/ChatMedia";
+import {
+  CHAT_MEDIA_ACCEPT,
+  createChatMediaUrls,
+  prepareChatMedia,
+  removeChatMedia,
+  uploadChatMedia,
+} from "@/lib/chatMedia";
+import type { PreparedMedia } from "@/lib/chatMedia";
 import { supabase } from "@/lib/supabase";
 import { normalizeTags } from "@/lib/tags";
 import type { JoinedTags } from "@/lib/tags";
@@ -35,10 +44,35 @@ export default function PostDetail() {
   const [userId, setUserId] = useState("");
   const [sending, setSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  // 送信待ちの添付メディア（画像はメタデータ除去済み）
+  const [preparedMedia, setPreparedMedia] = useState<PreparedMedia | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // 添付画像の再エンコード中
+  const [processing, setProcessing] = useState(false);
+  // media_path → 署名付きURL
+  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
 
   const messagesRef = useRef<HTMLDivElement>(null);
   // 最下部付近を表示しているときだけ、新着で自動スクロールする
   const stickToBottomRef = useRef(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlRef = useRef<string | null>(null);
+  // 署名付きURLの再発行は1パスにつき1回まで（期限切れ対策・無限ループ防止）
+  const retriedPathsRef = useRef(new Set<string>());
+
+  // 署名付きURLを発行して追加する
+  const loadMediaUrls = useCallback(async (paths: string[]) => {
+    const urls = await createChatMediaUrls(paths);
+    setMediaUrls((current) => ({ ...current, ...urls }));
+  }, []);
+
+  const scrollToBottomIfSticky = useCallback(() => {
+    const element = messagesRef.current;
+
+    if (element && stickToBottomRef.current) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, []);
 
   // 初期データの取得
   useEffect(() => {
@@ -102,14 +136,22 @@ export default function PostDetail() {
       if (commentError) {
         console.error(commentError);
       } else {
-        setComments(commentData ?? []);
+        const loadedComments: Comment[] = commentData ?? [];
+        setComments(loadedComments);
+
+        // 添付メディアのURLはまとめて発行する（完了を待たずに表示を始める）
+        loadMediaUrls(
+          loadedComments.flatMap((comment) =>
+            comment.media_path ? [comment.media_path] : []
+          )
+        );
       }
 
       setLoading(false);
     };
 
     getData();
-  }, [id]);
+  }, [id, loadMediaUrls]);
 
   // 他ユーザーの新着メッセージを購読する
   const postId = post?.id;
@@ -128,9 +170,13 @@ export default function PostDetail() {
           filter: `post_id=eq.${postId}`,
         },
         (payload) => {
-          setComments((current) =>
-            appendComment(current, payload.new as Comment)
-          );
+          const added = payload.new as Comment;
+
+          setComments((current) => appendComment(current, added));
+
+          if (added.media_path) {
+            loadMediaUrls([added.media_path]);
+          }
         }
       )
       .subscribe();
@@ -138,16 +184,33 @@ export default function PostDetail() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [postId]);
+  }, [postId, loadMediaUrls]);
 
   // 新着時の自動スクロール
   useEffect(() => {
-    const element = messagesRef.current;
+    scrollToBottomIfSticky();
+  }, [comments, loading, scrollToBottomIfSticky]);
 
-    if (element && stickToBottomRef.current) {
-      element.scrollTop = element.scrollHeight;
+  // 添付メディアを差し替える（古いプレビューURLは解放する）
+  const replaceAttachment = useCallback((media: PreparedMedia | null) => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
     }
-  }, [comments, loading]);
+
+    const url = media ? URL.createObjectURL(media.blob) : null;
+    previewUrlRef.current = url;
+    setPreparedMedia(media);
+    setPreviewUrl(url);
+  }, []);
+
+  // アンマウント時にプレビューURLを解放する
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+      }
+    };
+  }, []);
 
   // スクロール位置が最下部付近かを記録する
   const handleScroll = () => {
@@ -215,6 +278,33 @@ export default function PostDetail() {
     }
   };
 
+  // 送信できる状態か（本文かメディアのどちらかが必要）
+  const canSend =
+    !sending && !processing && (input.trim() !== "" || preparedMedia !== null);
+
+  // 添付ファイルの選択
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // 同じファイルを選び直せるようにする
+    e.target.value = "";
+
+    if (!file) return;
+
+    setErrorMessage("");
+    setProcessing(true);
+
+    const result = await prepareChatMedia(file);
+
+    setProcessing(false);
+
+    if ("error" in result) {
+      setErrorMessage(result.error);
+      return;
+    }
+
+    replaceAttachment(result.media);
+  };
+
   // メッセージ送信
   const handleSend = async () => {
     const trimmed = input.trim();
@@ -224,33 +314,70 @@ export default function PostDetail() {
       return;
     }
 
-    if (!trimmed || sending) return;
+    if (!canSend) return;
 
     setSending(true);
     setErrorMessage("");
     stickToBottomRef.current = true;
 
-    const { data, error } = await supabase
-      .from("comments")
-      .insert({
-        user_id: userId,
-        post_id: post.id,
-        content: trimmed,
-      })
-      .select()
-      .single();
+    try {
+      let mediaPath: string | null = null;
 
-    setSending(false);
+      if (preparedMedia) {
+        try {
+          mediaPath = await uploadChatMedia(userId, post.id, preparedMedia);
+        } catch (error) {
+          console.error(error);
+          setErrorMessage("ファイルを送信できませんでした。時間をおいて再度お試しください。");
+          return;
+        }
+      }
 
-    if (error) {
-      console.error(error);
-      setErrorMessage("送信できませんでした。時間をおいて再度お試しください。");
-      return;
+      const { data, error } = await supabase
+        .from("comments")
+        .insert({
+          user_id: userId,
+          post_id: post.id,
+          content: trimmed,
+          media_path: mediaPath,
+          media_type: preparedMedia?.type ?? null,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error(error);
+
+        // メッセージが登録できなかったファイルは残さない
+        if (mediaPath) {
+          await removeChatMedia(mediaPath);
+        }
+
+        setErrorMessage("送信できませんでした。時間をおいて再度お試しください。");
+        return;
+      }
+
+      // 自分の送信分は返り値で追加する
+      const added = data as Comment;
+      setComments((current) => appendComment(current, added));
+
+      if (added.media_path) {
+        loadMediaUrls([added.media_path]);
+      }
+
+      setInput("");
+      replaceAttachment(null);
+    } finally {
+      setSending(false);
     }
+  };
 
-    // 自分の送信分は返り値で追加する
-    setComments((current) => appendComment(current, data));
-    setInput("");
+  // 署名付きURLの期限切れなどで表示できないとき、1回だけURLを再発行する
+  const handleMediaError = (path: string) => {
+    if (retriedPathsRef.current.has(path)) return;
+
+    retriedPathsRef.current.add(path);
+    loadMediaUrls([path]);
   };
 
   // Enter で送信、Shift+Enter で改行
@@ -262,13 +389,13 @@ export default function PostDetail() {
   };
 
   // メッセージ削除（自分のものだけ）
-  const handleDeleteComment = async (commentId: number) => {
+  const handleDeleteComment = async (target: Comment) => {
     setErrorMessage("");
 
     const { error } = await supabase
       .from("comments")
       .delete()
-      .eq("id", commentId);
+      .eq("id", target.id);
 
     if (error) {
       console.error(error);
@@ -276,8 +403,13 @@ export default function PostDetail() {
       return;
     }
 
+    // 行を先に消してからファイルを消す（失敗してもログのみ）
+    if (target.media_path) {
+      removeChatMedia(target.media_path);
+    }
+
     setComments((current) =>
-      current.filter((comment) => comment.id !== commentId)
+      current.filter((comment) => comment.id !== target.id)
     );
   };
 
@@ -351,6 +483,7 @@ export default function PostDetail() {
 
         {comments.map((comment) => {
           const isMine = comment.user_id === userId;
+          const mediaPath = comment.media_path;
 
           return (
             <div
@@ -366,7 +499,18 @@ export default function PostDetail() {
               />
 
               <div className="chat-message__body">
-                <p className="chat-message__text">{comment.content}</p>
+                {comment.content && (
+                  <p className="chat-message__text">{comment.content}</p>
+                )}
+
+                {mediaPath && comment.media_type && (
+                  <ChatMedia
+                    type={comment.media_type}
+                    url={mediaUrls[mediaPath]}
+                    onLoad={scrollToBottomIfSticky}
+                    onError={() => handleMediaError(mediaPath)}
+                  />
+                )}
 
                 <div className="chat-message__meta">
                   <small>
@@ -380,7 +524,7 @@ export default function PostDetail() {
                     <button
                       type="button"
                       className="chat-message__delete"
-                      onClick={() => handleDeleteComment(comment.id)}
+                      onClick={() => handleDeleteComment(comment)}
                     >
                       削除
                     </button>
@@ -406,6 +550,26 @@ export default function PostDetail() {
           handleSend();
         }}
       >
+        {processing && (
+          <p className="chat-room__processing">画像を処理中...</p>
+        )}
+
+        {/* 送信前のプレビュー */}
+        {preparedMedia && previewUrl && (
+          <div className="chat-room__preview">
+            <ChatMedia type={preparedMedia.type} url={previewUrl} />
+
+            <button
+              type="button"
+              className="chat-room__preview-remove"
+              onClick={() => replaceAttachment(null)}
+              disabled={sending}
+            >
+              取り消す
+            </button>
+          </div>
+        )}
+
         <textarea
           className="chat-room__input"
           value={input}
@@ -417,15 +581,34 @@ export default function PostDetail() {
           disabled={sending}
         />
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={CHAT_MEDIA_ACCEPT}
+          onChange={handleFileChange}
+          hidden
+        />
+
         <div className="chat-room__form-footer">
-          <span className="chat-room__count">
-            {input.length}/{MAX_LENGTH}
-          </span>
+          <div className="chat-room__form-actions">
+            <button
+              type="button"
+              className="chat-room__attach"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending || processing}
+            >
+              画像・動画
+            </button>
+
+            <span className="chat-room__count">
+              {input.length}/{MAX_LENGTH}
+            </span>
+          </div>
 
           <button
             type="submit"
             className="chat-room__button"
-            disabled={sending || !input.trim()}
+            disabled={!canSend}
           >
             {sending ? "送信中..." : "送信"}
           </button>

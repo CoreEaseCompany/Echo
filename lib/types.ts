@@ -18,11 +18,15 @@ export type Profile = {
   bio: string | null;
 };
 
+export type ChatMediaType = "image" | "video";
+
 export type Comment = {
   id: number;
   user_id: string;
   content: string;
   created_at: string;
+  media_path: string | null;
+  media_type: ChatMediaType | null;
 };
 
 export type Empathy = {

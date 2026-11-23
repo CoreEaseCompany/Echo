@@ -27,6 +27,12 @@ Supabaseが提供するPostgreSQLデータベースを利用する。
 - 調査対象外：`auth`・`storage`などSupabase管理スキーマ、レコードの内容
 - 調査で確認できなかった項目（インデックス、トリガー、関数、ポリシー名、`empathies`のUNIQUE制約、ON DELETE CASCADEの実設定など）は「未確認」として残している。
 
+チャットでの画像・動画投稿機能（`docs/plans/features/chat-media-upload.md`）のSQLを実DBに適用済み。以下は上記の調査とは別に、実行したSQLの内容を反映したもの。
+
+- `comments`への列（`media_path` / `media_type`）とCHECK制約の追加、`comments_content_check`の置き換え
+- Storageバケット`chat-media`の作成と`storage.objects`のポリシー追加
+- 適用後の実DBの状態（制約・ポリシー名など）は再調査していない。
+
 ### 1.3 基本方針
 
 - ユーザー情報はSupabase Authで管理する。
@@ -53,6 +59,8 @@ Supabaseが提供するPostgreSQLデータベースを利用する。
 | post_tags | 投稿とタグの中間テーブル |
 
 認証情報はSupabase Authの`auth.users`で管理する。
+
+テーブルとは別に、チャットの画像・動画はSupabase Storageのバケット`chat-media`で管理する（「3.8 Storage（chat-media）」参照）。
 
 ---
 
@@ -209,18 +217,42 @@ create table comments (
   user_id uuid not null references auth.users(id) on delete cascade,
   post_id bigint not null references posts(id) on delete cascade,
   content text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  media_path text,
+  media_type text
 );
 
+-- 本文：500文字以下。空白のみは不可（ただしメディア付きなら空文字を許可）
 alter table comments
   add constraint comments_content_check
   check (
     char_length(content) <= 500
-    and btrim(content, E' \t\n\r　') <> ''
+    and (
+      btrim(content, E' \t\n\r　') <> ''
+      or (content = '' and media_path is not null)
+    )
+  );
+
+-- メディア種別は image / video のみ
+alter table comments
+  add constraint comments_media_type_check
+  check (media_type in ('image', 'video'));
+
+-- media_path と media_type は両方あるか、両方ないか
+alter table comments
+  add constraint comments_media_pair_check
+  check ((media_path is null) = (media_type is null));
+
+-- 自分のユーザーID・同じ投稿IDのフォルダ以外のファイルを参照させない
+alter table comments
+  add constraint comments_media_path_owner_check
+  check (
+    media_path is null
+    or media_path like user_id::text || '/' || post_id::text || '/%'
   );
 ```
 
-※CHECK制約の名前は未確認（上記は例）。
+※`media_path` / `media_type`と3つのメディア関連CHECK制約、および`comments_content_check`の置き換え（旧制約をDROPして再作成）は、チャット画像・動画投稿機能のSQLとして実行済み。上記の制約名はそのSQLで指定した名前。
 
 ### カラム一覧
 
@@ -229,8 +261,20 @@ alter table comments
 | id | bigint | PK | コメントID |
 | user_id | uuid | FK / NOT NULL | コメント投稿者 |
 | post_id | bigint | FK / NOT NULL | コメント対象の投稿 |
-| content | text | NOT NULL / CHECK | コメント本文（500文字以下・空白のみ不可） |
+| content | text | NOT NULL / CHECK | コメント本文（500文字以下。空白のみ不可。メディア付きの場合のみ空文字`''`可） |
 | created_at | timestamptz | NOT NULL / DEFAULT now() | 投稿日時 |
+| media_path | text | NULL可 / CHECK | 添付メディアのStorage上のパス（`{user_id}/{post_id}/{uuid}.{ext}`） |
+| media_type | text | NULL可 / CHECK | 添付メディアの種別（`image` / `video`） |
+
+### メディア添付の仕様
+
+- 1コメント（メッセージ）につき添付できるメディアは最大1件。複数送る場合は複数のコメントとして送信する。
+- メディアのみのコメントは`content = ''`、`media_path`・`media_type`を設定して登録する。
+- `media_path`と`media_type`は両方設定するか、両方NULLにする（`comments_media_pair_check`）。
+- `media_path`は`{user_id}/{post_id}/`で始まる必要があり、自分以外のフォルダや別の投稿のフォルダを参照できない（`comments_media_path_owner_check`）。
+- 実ファイルは非公開バケット`chat-media`に保存する（「3.8 Storage（chat-media）」参照）。
+- 投稿画面（`posts`）では画像・動画を添付できない。
+- 既存のコメントは`media_path` / `media_type`がNULLのまま。
 
 ### リレーション
 
@@ -253,6 +297,9 @@ alter table comments
 - コメントは対象となる投稿に紐付ける。
 - 投稿削除時は関連コメントも削除される。
 - コメント投稿者のusernameはprofilesから取得する。
+- コメントを削除しても、Storage上のファイルは自動では削除されない。アプリ側で`media_path`のファイルも削除する。
+- 投稿削除（ON DELETE CASCADE）やアカウント削除でコメントが消えた場合、Storage上のファイルは残る（孤立ファイル）。現時点では対応していない既知の制約。
+- コメントのUPDATEポリシーがないため、送信後にメディアを差し替えることはできない。
 
 ---
 
@@ -425,6 +472,62 @@ primary key (post_id, tag_id)
 
 ---
 
+## 3.8 Storage（chat-media）
+
+チャットに投稿された画像・動画を保存するSupabase Storageのバケット。`public`スキーマのテーブルではなく、`storage`スキーマ（`storage.buckets` / `storage.objects`）で管理される。
+
+### バケット定義
+
+```sql
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'chat-media',
+  'chat-media',
+  false,
+  52428800, -- 50MB（動画の上限。画像の10MBはアプリ側で検証）
+  array[
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+    'video/mp4', 'video/webm', 'video/quicktime'
+  ]
+);
+```
+
+| 項目 | 値 | 説明 |
+|---|---|---|
+| id / name | chat-media | バケット名 |
+| public | false | 非公開。表示には署名付きURLが必要 |
+| file_size_limit | 52428800（50MB） | 1ファイルの上限。画像の上限10MBはアプリ側で検証する |
+| allowed_mime_types | JPEG / PNG / WebP / GIF / MP4 / WebM / QuickTime | クライアント検証を回避されてもサーバー側で拒否する |
+
+### ファイルパス
+
+```text
+chat-media/{user_id}/{post_id}/{uuid}.{拡張子}
+```
+
+- 1階層目を`user_id`にし、RLSで本人のフォルダにのみ書き込めるようにする。
+- この`{user_id}/{post_id}/{uuid}.{拡張子}`が`comments.media_path`に保存される（バケット名は含まない）。
+- ファイル名は`crypto.randomUUID()`で生成し、拡張子は元のファイル名ではなくMIMEから決める。
+
+### データ操作
+
+| 操作 | 権限 |
+|---|---|
+| SELECT | 認証済みユーザー（署名付きURLの発行に必要） |
+| INSERT | 自分の`user_id`フォルダにのみ |
+| UPDATE | 不可（UPDATEポリシーなし。上書き・差し替え不可） |
+| DELETE | 自分の`user_id`フォルダのファイルのみ |
+
+### 注意事項
+
+- 画像・動画は認証済みユーザーのみ閲覧できる。URLは期限付きの署名付きURLで発行する（有効期限は1時間を想定）。
+- 実ファイルを持つコメントを削除したときは、アプリ側でStorageのファイルも削除する（DBのON DELETE CASCADEはStorageのファイルに及ばない）。
+- 投稿やアカウントの削除で消えたコメントのファイルはStorageに残る（既知の制約）。
+- JPEG / PNG / WebPはアップロード前にブラウザ側のCanvasで再エンコードし、EXIFなどのメタデータを除去する。GIF・動画のメタデータは除去されない。
+- Service Role Keyは使用しない。アップロード・署名URL発行・削除はすべてauthenticatedロールのRLS経由で行う。
+
+---
+
 # 4. テーブル間のリレーション
 
 ## 4.1 ER図
@@ -468,6 +571,8 @@ erDiagram
         bigint post_id FK
         text content
         timestamptz created_at
+        text media_path
+        text media_type
     }
 
     EMPATHIES {
@@ -504,6 +609,8 @@ erDiagram
 | tags | post_tags | 1対多 | post_tags.tag_id |
 
 postsとtagsはpost_tagsを介した多対多の関係。
+
+`comments.media_path`はStorageバケット`chat-media`内のファイルパスを指す。外部キーではなく文字列で参照するため、DB側ではファイルの存在や削除は連動しない（「3.8 Storage（chat-media）」参照）。
 
 ---
 
@@ -553,6 +660,8 @@ alter table empathies enable row level security;
 alter table tags enable row level security;
 alter table post_tags enable row level security;
 ```
+
+Storageの`storage.objects`はSupabaseがRLSを有効にして管理している（`chat-media`用のポリシーは「5.4」「5.5」参照）。
 
 ## 5.4 各テーブルのポリシー方針
 
@@ -615,6 +724,19 @@ alter table post_tags enable row level security;
 | 操作 | 条件 |
 |---|---|
 | UPDATE | USING / WITH CHECK 両方で auth.uid() = user_id（更新前・更新後とも本人） |
+
+### storage.objects（chat-media）
+
+`bucket_id = 'chat-media'`のオブジェクトに対するポリシー（対象ロールは`authenticated`）。
+
+| 操作 | 条件 |
+|---|---|
+| SELECT | bucket_id = 'chat-media' |
+| INSERT | bucket_id = 'chat-media' かつ パスの1階層目が auth.uid() と一致 |
+| UPDATE | なし（ポリシーなし＝不可） |
+| DELETE | bucket_id = 'chat-media' かつ パスの1階層目が auth.uid() と一致 |
+
+※コメントの`media_path`と実ファイルの対応（`{user_id}/{post_id}/`）は`comments_media_path_owner_check`で保証する。Storage側のポリシーは1階層目（`user_id`）のみ確認する。
 
 ## 5.5 RLSポリシーの実装例
 
@@ -768,6 +890,36 @@ using (
 );
 ```
 
+### storage.objects（chat-media）
+
+```sql
+-- ログインユーザーはチャットメディアを閲覧できる（署名付きURLの発行に必要）
+create policy "Authenticated users can view chat media"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'chat-media');
+
+-- 自分のフォルダにのみアップロードできる
+create policy "Users can upload own chat media"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'chat-media'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- 自分のファイルのみ削除できる
+create policy "Users can delete own chat media"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'chat-media'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- UPDATEポリシーは作成しない（上書き・差し替え不可）
+```
+
 ---
 
 # 6. データ操作のルール
@@ -810,6 +962,8 @@ DB側でもRLSによって本人以外の更新を防止する。
 - empathies
 - post_tags
 
+コメントに添付されたStorage上の画像・動画は、DBの外部キーでは削除されず残る（孤立ファイル。現時点では未対応）。
+
 ## 6.4 共感の追加・解除
 
 1. 対象投稿の共感状態を確認する。
@@ -826,6 +980,20 @@ DB側でもRLSによって本人以外の更新を防止する。
 3. コメント本文を検証する。
 4. commentsにINSERTする。
 5. コメント一覧を更新する。
+
+### メディア付きコメントの作成
+
+1. 画像・動画を選択し、形式とサイズを検証する（画像10MB・動画50MBまで）。
+2. JPEG / PNG / WebPはCanvasで再エンコードしてメタデータを除去する（失敗した場合は元画像をアップロードせずエラーにする）。
+3. `chat-media/{user_id}/{post_id}/{uuid}.{拡張子}`にアップロードする。
+4. commentsにINSERTする（`content`は空なら`''`、`media_path`・`media_type`を設定）。
+5. INSERTに失敗した場合は、アップロードしたファイルを削除する（孤立ファイル防止）。
+6. 表示時は`media_path`から署名付きURLを発行する。
+
+### メディア付きコメントの削除
+
+1. commentsから対象コメントをDELETEする（本人のみ）。
+2. `media_path`があれば、Storageからもファイルを削除する。Storage削除の失敗はログのみとし、画面上は削除済みとして扱う。
 
 ## 6.6 プロフィールの更新
 
@@ -879,6 +1047,16 @@ usernameの一意制約に違反した場合はエラーを表示する。
 | tags | name | タグ名の重複防止 |
 | post_tags | post_id, tag_id | 同じ投稿への同一タグの重複防止 |
 
+## 7.3.1 CHECK制約
+
+| テーブル | 制約名 | 内容 |
+|---|---|---|
+| posts | posts_content_check | 500文字以下・空白のみ不可 |
+| comments | comments_content_check | 500文字以下・空白のみ不可（`media_path`があれば空文字を許可） |
+| comments | comments_media_type_check | `media_type`は`image` / `video`のみ |
+| comments | comments_media_pair_check | `media_path`と`media_type`は両方NULLか両方NOT NULL |
+| comments | comments_media_path_owner_check | `media_path`は`{user_id}/{post_id}/`で始まる |
+
 ## 7.4 NOT NULL制約
 
 以下の項目は必須。
@@ -887,7 +1065,7 @@ usernameの一意制約に違反した場合はエラーを表示する。
 - posts.content
 - comments.user_id
 - comments.post_id
-- comments.content
+- comments.content（メディアのみの場合は空文字`''`を設定し、NULLにはしない）
 - empathies.user_id
 - empathies.post_id
 - tags.name
@@ -967,6 +1145,14 @@ NEXT_PUBLIC_が付く環境変数に秘密鍵を設定しない。
 - 他人の共感を解除できない。
 - 他人の投稿にタグを追加・削除できない。
 - 未認証ユーザーが保護対象データを操作できない。
+- 他人の`user_id`フォルダにチャットメディアをアップロードできない。
+- 他人のチャットメディアを削除できない。
+- 他人のフォルダや別の投稿のフォルダのパスを`media_path`に指定したコメントをINSERTできない。
+- `media_type`に`image` / `video`以外を設定できない。
+- `media_path`と`media_type`の片方だけを設定したコメントをINSERTできない。
+- `media_path`がないのに`content`が空文字のコメントをINSERTできない。
+- 許可外のMIMEタイプ、または50MBを超えるファイルを直接アップロードしても拒否される。
+- 未認証ユーザーが署名付きURLの発行・チャットメディアのアップロードをできない。
 
 ## 9.5 実DB調査で判明した注意点
 
@@ -975,6 +1161,14 @@ NEXT_PUBLIC_が付く環境変数に秘密鍵を設定しない。
 - `profiles`にはDELETEポリシーがなく、RLS経由では削除できない。
 - `post_tags`にはUPDATEポリシーがない。タグの変更はDELETE→INSERTで行う。
 - `empathies`のUNIQUE(user_id, post_id)は調査結果に記載がなく、実DBでの存在は未確認。
+
+## 9.6 チャットメディア（chat-media）に関する注意点
+
+- バケット`chat-media`は非公開。画像・動画は署名付きURL（期限付き）で表示し、公開URLは使用しない。
+- JPEG / PNG / WebPは、アップロード前にブラウザ側で再エンコードしてEXIF（位置情報・撮影日時・カメラ情報など）を除去する。サーバー側ではメタデータの除去を保証していない。GIF・動画のメタデータは除去されない。
+- Storageにはクライアント側の検証とは別に、バケットの`allowed_mime_types`と`file_size_limit`（50MB）の制限がある。画像の10MB上限はアプリ側の検証のみ（DB・Storage側の制限はない）。
+- コメントの削除、投稿やアカウントの削除に伴うStorageファイルの扱いは「3.4 comments」「3.8 Storage（chat-media）」を参照（孤立ファイルは未対応）。
+- 適用後の実DBの制約名・ポリシー名・バケット設定は、実DB調査では再確認していない。
 
 ---
 

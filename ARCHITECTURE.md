@@ -36,6 +36,8 @@ Supabase
  +-- PostgreSQL Database
  |
  +-- Row Level Security
+ |
+ +-- Storage（チャットの画像・動画）
 ```
 
 ### 1.4 アーキテクチャの方針
@@ -65,6 +67,7 @@ Supabase
 | BaaS | Supabase | バックエンド機能 |
 | DB | PostgreSQL | データ保存 |
 | 認証 | Supabase Auth | ユーザー認証 |
+| ファイル保存 | Supabase Storage | チャットの画像・動画（非公開バケット`chat-media`・署名付きURL） |
 | バージョン管理 | Git / GitHub | ソースコード管理 |
 | AI開発支援 | Claude Code | コード調査・実装・修正 |
 | デプロイ候補 | Vercel | Next.jsのホスティング |
