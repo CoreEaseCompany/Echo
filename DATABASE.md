@@ -19,6 +19,14 @@ Claude Codeなどの開発支援ツールは、データベースに関係する
 
 Supabaseが提供するPostgreSQLデータベースを利用する。
 
+### 1.2.1 実DB調査の反映状況
+
+本ドキュメントは、2026-11-23時点のSupabase実DB調査結果（`public`スキーマのテーブル構造とRLSポリシー）を反映している。
+
+- 調査対象：アプリケーション用の`public`スキーマ（全6テーブル、RLSはすべて有効）
+- 調査対象外：`auth`・`storage`などSupabase管理スキーマ、レコードの内容
+- 調査で確認できなかった項目（インデックス、トリガー、関数、ポリシー名、`empathies`のUNIQUE制約、ON DELETE CASCADEの実設定など）は「未確認」として残している。
+
 ### 1.3 基本方針
 
 - ユーザー情報はSupabase Authで管理する。
@@ -107,7 +115,7 @@ alter table posts
   );
 ```
 
-※上記の CHECK 制約は本番DBへの適用が必要（未適用の場合は投稿画面で保存が失敗しうる）。
+※上記の CHECK 制約は本番DBに適用済み（実DB調査で確認）。
 
 ### リレーション
 
@@ -172,13 +180,13 @@ create table profiles (
 | SELECT | 認証済みユーザー |
 | INSERT | 自分のプロフィールのみ |
 | UPDATE | 自分のプロフィールのみ |
-| DELETE | 要確認 |
+| DELETE | 不可（DELETEポリシーなし） |
 
 ### プロフィールの仕様
 
 - usernameはユーザー間で重複できない。
-- usernameは最大30文字。
-- bioは最大200文字。
+- usernameは最大30文字（アプリ側の検証のみ。DB側のCHECK制約は確認されていない）。
+- bioは最大200文字（アプリ側の検証のみ。DB側のCHECK制約は確認されていない）。
 - usernameは必須入力。
 - プロフィール更新にはupsertを使用している。
 - usernameが重複した場合、PostgreSQLの一意制約違反（23505）を処理する。
@@ -201,9 +209,18 @@ create table comments (
   user_id uuid not null references auth.users(id) on delete cascade,
   post_id bigint not null references posts(id) on delete cascade,
   content text not null,
-  created_at timestamptz default now()
+  created_at timestamptz not null default now()
 );
+
+alter table comments
+  add constraint comments_content_check
+  check (
+    char_length(content) <= 500
+    and btrim(content, E' \t\n\r　') <> ''
+  );
 ```
+
+※CHECK制約の名前は未確認（上記は例）。
 
 ### カラム一覧
 
@@ -212,8 +229,8 @@ create table comments (
 | id | bigint | PK | コメントID |
 | user_id | uuid | FK / NOT NULL | コメント投稿者 |
 | post_id | bigint | FK / NOT NULL | コメント対象の投稿 |
-| content | text | NOT NULL | コメント本文 |
-| created_at | timestamptz | DEFAULT now() | 投稿日時 |
+| content | text | NOT NULL / CHECK | コメント本文（500文字以下・空白のみ不可） |
+| created_at | timestamptz | NOT NULL / DEFAULT now() | 投稿日時 |
 
 ### リレーション
 
@@ -228,7 +245,7 @@ create table comments (
 |---|---|
 | SELECT | 認証済みユーザー |
 | INSERT | 自分のユーザーIDを指定した場合のみ |
-| UPDATE | 要確認 |
+| UPDATE | 不可（UPDATEポリシーなし） |
 | DELETE | 自分のコメントのみ |
 
 ### 注意事項
@@ -250,7 +267,7 @@ create table empathies (
   id bigint generated always as identity primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
   post_id bigint not null references posts(id) on delete cascade,
-  created_at timestamptz default now(),
+  created_at timestamptz not null default now(),
   unique(user_id, post_id)
 );
 ```
@@ -262,7 +279,7 @@ create table empathies (
 | id | bigint | PK | 共感ID |
 | user_id | uuid | FK / NOT NULL | 共感したユーザー |
 | post_id | bigint | FK / NOT NULL | 共感対象の投稿 |
-| created_at | timestamptz | DEFAULT now() | 共感日時 |
+| created_at | timestamptz | NOT NULL / DEFAULT now() | 共感日時 |
 
 ### リレーション
 
@@ -279,13 +296,15 @@ unique(user_id, post_id)
 
 同じユーザーが同じ投稿に複数回共感することを防止する。
 
+※この一意制約は実DB調査結果に記載がなく、実DBでの存在は未確認。存在しない場合は同一ユーザーの重複共感が可能になるため、Supabase上で確認すること。
+
 ### データ操作
 
 | 操作 | 権限 |
 |---|---|
 | SELECT | 認証済みユーザー |
 | INSERT | 自分のユーザーIDを指定した場合のみ |
-| UPDATE | 要確認 |
+| UPDATE | 不可（UPDATEポリシーなし） |
 | DELETE | 自分の共感のみ |
 
 ### 共感の仕様
@@ -338,12 +357,14 @@ on conflict (name) do nothing;
 | 操作 | 権限 |
 |---|---|
 | SELECT | 認証済みユーザー |
-| INSERT | 要確認 |
-| UPDATE | 要確認 |
-| DELETE | 要確認 |
+| INSERT | 不可（書き込みポリシーなし） |
+| UPDATE | 不可（書き込みポリシーなし） |
+| DELETE | 不可（書き込みポリシーなし） |
 
 ### 注意事項
 
+- クライアント（authenticated）からはタグの作成・編集・削除ができない。タグの追加・変更はSQLエディタ等で行う。
+- ユーザーがタグを作成・編集する機能が必要になった場合は、権限設計（ポリシー追加）を別途検討する。
 - タグはマスターデータとして扱う。
 - 投稿に設定するタグはtagsに存在するものから選択する。
 - タグ名は重複できない。
@@ -393,7 +414,7 @@ primary key (post_id, tag_id)
 |---|---|
 | SELECT | 認証済みユーザー |
 | INSERT | 自分の投稿に対してのみ |
-| UPDATE | 要確認 |
+| UPDATE | 不可（UPDATEポリシーなし。付け替えはDELETE→INSERT） |
 | DELETE | 自分の投稿に対してのみ |
 
 ### 注意事項
@@ -492,6 +513,8 @@ postsとtagsはpost_tagsを介した多対多の関係。
 
 全テーブルでRLSを有効にし、ユーザーごとにデータ操作の権限を制御する。
 
+実DB調査により、`public`スキーマの全6テーブルでRLSが有効であることを確認済み。ポリシーはすべてPERMISSIVE、対象ロールは`authenticated`。
+
 フロントエンド側の表示制御だけではセキュリティを確保できないため、データベース側でも必ず権限を確認する。
 
 ## 5.2 RLSの基本構造
@@ -520,7 +543,7 @@ RLS Policy
 
 ## 5.3 RLSの有効化
 
-以下のテーブルではRLSを有効にする。
+以下のテーブルでRLSを有効にしている（実DBで確認済み）。
 
 ```sql
 alter table posts enable row level security;
@@ -548,8 +571,8 @@ alter table post_tags enable row level security;
 |---|---|
 | SELECT | 認証済みユーザー |
 | INSERT | auth.uid() = user_id |
-| UPDATE | auth.uid() = user_id |
-| DELETE | 要確認 |
+| UPDATE | auth.uid() = user_id（USING / WITH CHECK 両方） |
+| DELETE | なし（ポリシーなし＝不可） |
 
 ### comments
 
@@ -557,7 +580,7 @@ alter table post_tags enable row level security;
 |---|---|
 | SELECT | 認証済みユーザー |
 | INSERT | auth.uid() = user_id |
-| UPDATE | 要確認 |
+| UPDATE | なし（ポリシーなし＝不可） |
 | DELETE | auth.uid() = user_id |
 
 ### empathies
@@ -566,7 +589,7 @@ alter table post_tags enable row level security;
 |---|---|
 | SELECT | 認証済みユーザー |
 | INSERT | auth.uid() = user_id |
-| UPDATE | 要確認 |
+| UPDATE | なし（ポリシーなし＝不可） |
 | DELETE | auth.uid() = user_id |
 
 ### tags
@@ -574,9 +597,9 @@ alter table post_tags enable row level security;
 | 操作 | 条件 |
 |---|---|
 | SELECT | 認証済みユーザー |
-| INSERT | 要確認 |
-| UPDATE | 要確認 |
-| DELETE | 要確認 |
+| INSERT | なし（ポリシーなし＝不可） |
+| UPDATE | なし（ポリシーなし＝不可） |
+| DELETE | なし（ポリシーなし＝不可） |
 
 ### post_tags
 
@@ -584,14 +607,20 @@ alter table post_tags enable row level security;
 |---|---|
 | SELECT | 認証済みユーザー |
 | INSERT | 関連するposts.user_idがauth.uid()と一致 |
-| UPDATE | 要確認 |
+| UPDATE | なし（ポリシーなし＝不可） |
 | DELETE | 関連するposts.user_idがauth.uid()と一致 |
+
+### posts（補足）
+
+| 操作 | 条件 |
+|---|---|
+| UPDATE | USING / WITH CHECK 両方で auth.uid() = user_id（更新前・更新後とも本人） |
 
 ## 5.5 RLSポリシーの実装例
 
 以下はポリシーの考え方を示す例。
 
-実際のポリシー名や設定と完全に一致するとは限らない。
+ポリシーの条件（対象操作・USING / WITH CHECK）は実DB調査結果と一致するが、ポリシー名は未確認のため、実際の名前とは異なる可能性がある。
 
 ### posts
 
@@ -938,6 +967,14 @@ NEXT_PUBLIC_が付く環境変数に秘密鍵を設定しない。
 - 他人の共感を解除できない。
 - 他人の投稿にタグを追加・削除できない。
 - 未認証ユーザーが保護対象データを操作できない。
+
+## 9.5 実DB調査で判明した注意点
+
+- `tags`には書き込みポリシーがなく、クライアントからタグの作成・編集・削除はできない。
+- `comments`・`empathies`にはUPDATEポリシーがなく、RLS経由では更新できない。
+- `profiles`にはDELETEポリシーがなく、RLS経由では削除できない。
+- `post_tags`にはUPDATEポリシーがない。タグの変更はDELETE→INSERTで行う。
+- `empathies`のUNIQUE(user_id, post_id)は調査結果に記載がなく、実DBでの存在は未確認。
 
 ---
 

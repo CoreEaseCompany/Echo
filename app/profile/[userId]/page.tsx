@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getUserColor } from "@/lib/userColor";
+import ProfilePostList from "@/components/ProfilePostList";
 import type { Profile } from "@/lib/types";
 
 export default function PublicProfilePage() {
@@ -13,6 +14,7 @@ export default function PublicProfilePage() {
   const userId = params.userId as string;
 
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [viewerId, setViewerId] = useState<string | null>(null);
   const [loggedIn, setLoggedIn] = useState(true);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -26,6 +28,8 @@ export default function PublicProfilePage() {
         setLoading(false);
         return;
       }
+
+      setViewerId(authData.user.id);
 
       // 自分自身のプロフィールは編集可能な /profile に集約する
       if (authData.user.id === userId) {
@@ -85,6 +89,7 @@ export default function PublicProfilePage() {
   }
 
   return (
+    <>
     <section className="profile-card">
       <h1 className="profile-card__title">プロフィール</h1>
 
@@ -116,5 +121,13 @@ export default function PublicProfilePage() {
         />
       </div>
     </section>
+
+    <ProfilePostList
+      key={profile.user_id}
+      userId={profile.user_id}
+      username={profile.username ?? ""}
+      viewerId={viewerId}
+    />
+    </>
   );
 }

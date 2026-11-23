@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getUserColor } from "@/lib/userColor";
+import ProfilePostList from "@/components/ProfilePostList";
 
 export default function ProfilePage() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -109,6 +110,7 @@ export default function ProfilePage() {
   }
 
   return (
+    <>
     <section className="profile-card">
       <h1 className="profile-card__title">プロフィール</h1>
 
@@ -166,5 +168,8 @@ export default function ProfilePage() {
 
       {message && <p className="profile-card__message">{message}</p>}
     </section>
+
+    <ProfilePostList key={userId} userId={userId} username={username} viewerId={userId} />
+    </>
   );
 }

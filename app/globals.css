@@ -35,6 +35,42 @@ body::before {
 }
 
 /* =========================
+   スクロールバー
+========================= */
+
+/* Firefox（webkit非対応ブラウザのみ） */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: auto;
+    scrollbar-color: #7c6fd6 rgba(229, 229, 229, 0.6);
+  }
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 16px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(229, 229, 229, 0.4);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #7c6fd6;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px #5b4fb0;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #8d82e0;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* =========================
    全体レイアウト
 ========================= */
 
@@ -686,7 +722,7 @@ body::before {
   margin: 40px auto;
   padding: 28px 32px 24px;
   border-radius: 16px;
-  background: #d9d9d9;
+  background: rgba(217, 217, 217, 0.8);
   color: #1e293b;
   box-sizing: border-box;
 }
@@ -793,6 +829,46 @@ body::before {
     margin: 24px auto;
     padding: 20px 16px;
   }
+}
+
+/* =========================
+   プロフィール 投稿一覧（1画面1カード）
+========================= */
+
+.profile-post-list {
+  width: 100%;
+  margin: 0 0 40px;
+  padding-inline: 20px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 50px;
+}
+
+.profile-card:has(+ .profile-post-list) {
+  margin-bottom: 8px;
+}
+
+.profile-post-item {
+  width: 100%;
+  max-width: 400px;
+}
+
+.profile-post-list__state {
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+  color: white;
+}
+
+.profile-post-list__state--inline {
+  padding: 8px 0;
+}
+
+.profile-post-list__sentinel {
+  width: 100%;
+  height: 1px;
 }
 
 /* =========================
